@@ -1,49 +1,206 @@
 #!/bin/bash
 
 # Configuration
-OUTPUT_FILE="/var/www/html/index.html" # We'll name it index.html to be the default
-SERVER_TIMEZONE="America/Detroit" # Set your timezone for date output
+OUTPUT_FILE="/var/www/html/index.html" # The HTML file Apache will serve
+SERVER_TIMEZONE="America/Detroit" # Set your server's timezone for date output
 
 # --- Collect System Information ---
 
-# Date and Time
+# Date and Time for server-side generated timestamp
 CURRENT_DATE=$(TZ="$SERVER_TIMEZONE" date +"%A, %B %d %Y")
-CURRENT_TIME=$(TZ="$SERVER_TIMEZONE" date +"%H:%M:%S") # Added seconds for more real-time feel
+CURRENT_TIME=$(TZ="$SERVER_TIMEZONE" date +"%H:%M:%S")
 
-# Disk Space (for /)
-# Using `df -B1` for bytes, and then parsing.
-# For total, used, available, percentage on the root filesystem
-DF_OUTPUT=$(df -B1 / | awk 'NR==2 {print $2, $3, $4, $5}')
-TOTAL_BYTES=$(echo "$DF_OUTPUT" | awk '{print $1}')
-USED_BYTES=$(echo "$DF_OUTPUT" | awk '{print $2}')
-AVAILABLE_BYTES=$(echo "$DF_OUTPUT" | awk '{print $3}')
-USAGE_PERCENTAGE=$(echo "$DF_OUTPUT" | awk '{print $4}' | sed 's/%//') # Remove % sign
+# Determine a short timezone abbreviation for display
+SERVER_TIMEZONE_SHORT=$(TZ="$SERVER_TIMEZONE" date +"%Z")
 
-# Convert bytes to a more readable format (MB, GB, etc.) - Bash doesn't do floats easily
+# 1. Disk Space (for /) - Retaining previous full detail
+DF_OUTPUT_ROOT=$(df -B1 / | awk 'NR==2 {print $2, $3, $4, $5}')
+TOTAL_BYTES=$(echo "$DF_OUTPUT_ROOT" | awk '{print $1}')
+USED_BYTES=$(echo "$DF_OUTPUT_ROOT" | awk '{print $2}')
+AVAILABLE_BYTES=$(echo "$DF_OUTPUT_ROOT" | awk '{print $3}')
+USAGE_PERCENTAGE=$(echo "$DF_OUTPUT_ROOT" | awk '{print $4}' | sed 's/%//')
+
 TOTAL_SPACE_GB=$(echo "scale=2; $TOTAL_BYTES / (1024*1024*1024)" | bc)
 USED_SPACE_GB=$(echo "scale=2; $USED_BYTES / (1024*1024*1024)" | bc)
 AVAILABLE_SPACE_GB=$(echo "scale=2; $AVAILABLE_BYTES / (1024*1024*1024)" | bc)
 
-# Memory Information (from /proc/meminfo)
+
+# 2. Memory Information (from /proc/meminfo) - Specific request: Total, Available, Used
 MEMTOTAL_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
 MEMAVAILABLE_KB=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+MEMUSED_KB=$((MEMTOTAL_KB - MEMAVAILABLE_KB)) # Calculated used memory
 
-# CPU Information (from /proc/cpuinfo)
+# Convert to MB for display
+MEMTOTAL_MB=$(echo "scale=2; $MEMTOTAL_KB / 1024" | bc)
+MEMAVAILABLE_MB=$(echo "scale=2; $MEMAVAILABLE_KB / 1024" | bc)
+MEMUSED_MB=$(echo "scale=2; $MEMUSED_KB / 1024" | bc)
+
+
+# 3. CPU Information (from /proc/cpuinfo) - Retained
 NUM_PROCESSORS=$(grep -c ^processor /proc/cpuinfo)
-CPU_MHZ=$(grep "cpu MHz" /proc/cpuinfo | head -n 1 | awk '{print int($4)}') # Get integer part
+CPU_MHZ=$(grep "cpu MHz" /proc/cpuinfo | head -n 1 | awk '{print int($4)}')
 
-# System Uptime and Load Averages
+
+# 4. System Uptime and Load Averages - Retained
 UPTIME_INFO=$(uptime)
 
-# Username of script runner (will be 'root' if run by cron as root, or 'www-data' if run via web)
+
+# 5. User Logins (Past 5 Days)
+USER_LOGIN_DATA="No user logins recorded in the past 5 days, or 'last' command output not available."
+
+if command -v last &> /dev/null
+then
+    LOGIN_RAW=$(last -F -s -5days | grep -Ev "wtmp|reboot|shutdown|system boot" | head -n 20) # Limit to 20 recent logins
+
+    if [ -n "$LOGIN_RAW" ]; then
+        USER_LOGIN_DATA="<table style=\"width:100%; border-collapse: collapse; table-layout: fixed;\">" # Added table-layout: fixed
+        USER_LOGIN_DATA+="<thead><tr style=\"background-color:#444;\">"
+        USER_LOGIN_DATA+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 15%;\">User</th>"
+        USER_LOGIN_DATA+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 25%;\">From (IP/TTY)</th>"
+        USER_LOGIN_DATA+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 30%;\">Login Time</th>"
+        USER_LOGIN_DATA+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 30%;\">Logout Time / Duration</th>"
+        USER_LOGIN_DATA+="</tr></thead><tbody>"
+
+        while IFS= read -r line; do
+            user=$(echo "$line" | awk '{print $1}')
+            tty=$(echo "$line" | awk '{print $2}')
+            # Logic to find the IP/Hostname
+            from=$(echo "$line" | awk '{
+                if ($3 ~ /\./ || $3 == ":0" || $3 == ":1") { print $3 }
+                else if ($4 ~ /\./ || $4 == ":0" || $4 == ":1") { print $4 }
+                else { print $3 } # Default to $3 if no clear IP
+            }')
+            display_from="${tty} (${from})"
+
+            login_time_full=$(echo "$line" | awk '{
+                for (i=5; i<=NF; i++) {
+                    if ($i ~ /^[0-9]{4}$/) { # Found year
+                        for (j=i-4; j<=i; j++) printf "%s ", $j;
+                        exit;
+                    }
+                }
+            }' | xargs)
+
+            logout_info=$(echo "$line" | awk '{
+                logout_start_idx = 0;
+                for (i=5; i<=NF; i++) {
+                    if ($i ~ /^[0-9]{4}$/) { # Found year, next is logout info start
+                        logout_start_idx = i + 1;
+                        break;
+                    }
+                }
+                if (logout_start_idx > 0) {
+                    for (i=logout_start_idx; i<=NF; i++) printf "%s ", $i;
+                } else {
+                    print "N/A";
+                }
+            }' | xargs)
+
+            # Escape HTML special characters
+            user=$(echo "$user" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            display_from=$(echo "$display_from" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            login_time_full=$(echo "$login_time_full" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            logout_info=$(echo "$logout_info" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+
+            USER_LOGIN_DATA+="<tr>"
+            USER_LOGIN_DATA+="<td style=\"padding: 8px; border: 1px solid #555;\">${user}</td>"
+            USER_LOGIN_DATA+="<td style=\"padding: 8px; border: 1px solid #555;\">${display_from}</td>"
+            USER_LOGIN_DATA+="<td style=\"padding: 8px; border: 1px solid #555;\">${login_time_full}</td>"
+            USER_LOGIN_DATA+="<td style=\"padding: 8px; border: 1px solid #555;\">${logout_info}</td>"
+            USER_LOGIN_DATA+="</tr>"
+        done <<< "$LOGIN_RAW"
+        USER_LOGIN_DATA+="</tbody></table>"
+    fi
+else
+    USER_LOGIN_DATA="<p>The 'last' command is not available to retrieve user login data.</p>"
+fi
+
+
+# 6. Active Disk Information - Mounted Filesystems (including swap)
+ACTIVE_DISK_INFO_HTML="<p>No active disk information found or suitable devices.</p>"
+
+DF_ALL_OUTPUT=$(df -hT --output=source,used,pcent,fstype,target 2>/dev/null | tail -n +2)
+
+if [ -n "$DF_ALL_OUTPUT" ]; then
+    ACTIVE_DISK_INFO_HTML="<table style=\"width:100%; border-collapse: collapse; table-layout: fixed;\">" # Added table-layout: fixed
+    ACTIVE_DISK_INFO_HTML+="<thead><tr style=\"background-color:#444;\">"
+    ACTIVE_DISK_INFO_HTML+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 40%;\">Device (Mount Point)</th>"
+    ACTIVE_DISK_INFO_HTML+="<th style=\"padding: 8px; border: 1px solid #555; text-align: right; width: 30%;\">Used Space</th>"
+    ACTIVE_DISK_INFO_HTML+="<th style=\"padding: 8px; border: 1px solid #555; text-align: right; width: 30%;\">Usage %</th>"
+    ACTIVE_DISK_INFO_HTML+="</tr></thead><tbody>"
+
+    echo "$DF_ALL_OUTPUT" | while IFS= read -r line; do
+        DEVICE=$(echo "$line" | awk '{print $1}')
+        USED=$(echo "$line" | awk '{print $3}')
+        PERCENT=$(echo "$line" | awk '{print $4}')
+        FSTYPE=$(echo "$line" | awk '{print $2}')
+        MOUNT_POINT=$(echo "$line" | awk '{print $5}')
+
+        if [[ "$FSTYPE" != "tmpfs" && \
+              "$FSTYPE" != "devtmpfs" && \
+              "$FSTYPE" != "squashfs" && \
+              "$FSTYPE" != "cgroup" && \
+              "$FSTYPE" != "overlay" && \
+              "$FSTYPE" != "fuse.portal" && \
+              "$FSTYPE" != "efivarfs" && \
+              "$DEVICE" != "udev" && \
+              "$DEVICE" != "tmpfs" && \
+              "$DEVICE" != "cgroup" && \
+              "$MOUNT_POINT" != "/snap"* && \
+              "$MOUNT_POINT" != "/var/lib/snapd/snap"* && \
+              "$MOUNT_POINT" != "/run/user"* ]]; then
+            ACTIVE_DISK_INFO_HTML+="<tr>"
+            ACTIVE_DISK_INFO_HTML+="<td style=\"padding: 8px; border: 1px solid #555;\">${DEVICE} (${MOUNT_POINT})</td>"
+            ACTIVE_DISK_INFO_HTML+="<td style=\"padding: 8px; border: 1px solid #555; text-align: right;\">${USED}</td>"
+            ACTIVE_DISK_INFO_HTML+="<td style=\"padding: 8px; border: 1px solid #555; text-align: right;\">${PERCENT}</td>"
+            ACTIVE_DISK_INFO_HTML+="</tr>"
+        fi
+    done
+    
+    # Add swap information
+    SWAP_INFO=$(swapon -s)
+    if [ -n "$SWAP_INFO" ]; then
+        echo "$SWAP_INFO" | tail -n +2 | while IFS= read -r line; do
+            SWAP_DEVICE=$(echo "$line" | awk '{print $1}')
+            SWAP_USED_KB=$(echo "$line" | awk '{print $3}')
+            SWAP_TOTAL_KB=$(echo "$line" | awk '{print $2}')
+            
+            if [ "$SWAP_TOTAL_KB" -gt 0 ]; then
+                SWAP_PERCENT=$(echo "scale=0; ($SWAP_USED_KB * 100) / $SWAP_TOTAL_KB" | bc)
+            else
+                SWAP_PERCENT="0"
+            fi
+            
+            ACTIVE_DISK_INFO_HTML+="<tr>"
+            ACTIVE_DISK_INFO_HTML+="<td style=\"padding: 8px; border: 1px solid #555;\">${SWAP_DEVICE} (swap)</td>"
+            ACTIVE_DISK_INFO_HTML+="<td style=\"padding: 8px; border: 1px solid #555; text-align: right;\">${SWAP_USED_KB}K</td>"
+            ACTIVE_DISK_INFO_HTML+="<td style=\"padding: 8px; border: 1px solid #555; text-align: right;\">${SWAP_PERCENT}%</td>"
+            ACTIVE_DISK_INFO_HTML+="</tr>"
+        done
+    fi
+
+    ACTIVE_DISK_INFO_HTML+="</tbody></table>"
+fi
+
+
+# 7. Recent Apache Access Log Entries
+LAST_ACCESS_LOGS=$(tail -n 10 /var/log/apache2/access.log 2>/dev/null | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+
+if [ -z "$LAST_ACCESS_LOGS" ]; then
+    LAST_ACCESS_LOGS="<p>No recent Apache access log entries found or log file is inaccessible.</p>"
+fi
+
+
+# Username of script runner (will be 'root' if run by cron as root) - Retained
 RUN_BY_USER=$(whoami)
+
 
 # --- Generate HTML Output ---
 cat <<EOF > "$OUTPUT_FILE"
 <!DOCTYPE html>
 <html>
 <head>
-    <title>My System  Status Report</title>
+    <title>Server Status Report</title>
     <meta http-equiv="refresh" content="60"> <style>
         body {
             font-family: monospace;
@@ -58,6 +215,20 @@ cat <<EOF > "$OUTPUT_FILE"
             overflow-x: auto;
             white-space: pre-wrap;
             word-wrap: break-word;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            padding: 8px;
+            border: 1px solid #555;
+            text-align: left;
+        }
+        th {
+            background-color: #444;
+            color: #0f0;
         }
         hr {
             border: 0;
@@ -80,11 +251,26 @@ cat <<EOF > "$OUTPUT_FILE"
             text-align: center;
             color: #aaa;
         }
+        #live-clock { /* Style for the live clock */
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #0ff; /* Cyan color */
+            display: inline-block; /* Allows text around it to flow */
+            min-width: 90px; /* Prevent jumping if time changes width */
+        }
     </style>
 </head>
 <body>
 
-    <h1>My System Status - Generated Report</h1>
+    <h1>Server Status - Generated Report</h1>
+    <hr>
+
+    <p class="section-title">Memory Information</p>
+    <pre>
+Total Memory      : ${MEMTOTAL_MB} MB
+Available Memory  : ${MEMAVAILABLE_MB} MB
+Used Memory       : ${MEMUSED_MB} MB
+    </pre>
     <hr>
 
     <p class="section-title">Disk Space Information (Root Filesystem)</p>
@@ -96,12 +282,18 @@ cat <<EOF > "$OUTPUT_FILE"
     </pre>
     <hr>
 
-    <p class="section-title">Memory Information</p>
+    <p class="section-title">Active Disk Information (Mounted Filesystems and Swap)</p>
+    ${ACTIVE_DISK_INFO_HTML}
+    <hr>
+
+    <p class="section-title">User Logins (Past 5 Days)</p>
+    ${USER_LOGIN_DATA}
+    <hr>
+
+    <p class="section-title">CPU Information</p>
     <pre>
 The system has ${NUM_PROCESSORS} Processors
 The average CPU speed is ${CPU_MHZ} MHz
-The system has ${MEMTOTAL_KB} kB of total memory
-The system has ${MEMAVAILABLE_KB} kB of available memory
     </pre>
     <hr>
 
@@ -111,12 +303,68 @@ ${UPTIME_INFO}
     </pre>
     <hr>
 
-    <p>Run by: ${RUN_BY_USER}</p>
+    <p class="section-title">Recent Apache Access Logs (Last 10 Entries)</p>
+    <pre>
+    ${LAST_ACCESS_LOGS}
+    </pre>
+    <hr>
+
+    <p>Script last run by: ${RUN_BY_USER}</p>
     <hr>
 
     <footer>
-        <p>Page assembled ${CURRENT_DATE} - ${CURRENT_TIME} EDT</p>
+        <p>Page generated on server: ${CURRENT_DATE} - ${CURRENT_TIME} ${SERVER_TIMEZONE_SHORT}</p>
+        <p>Current time (your browser): <span id="live-clock"></span></p>
     </footer>
+
+    <script>
+        // JavaScript to update a live clock in the browser
+        function updateClock() {
+            var now = new Date();
+            var hours = String(now.getHours()).padStart(2, '0');
+            var minutes = String(now.getMinutes()).padStart(2, '0');
+            var seconds = String(now.getSeconds()).padStart(2, '0');
+            var timeString = hours + ':' + minutes + ':' + seconds;
+
+            // Attempt to get the client's timezone abbreviation.
+            // Note: This can be tricky and might not always produce the desired short abbreviation like 'EDT'.
+            // For full accuracy, a library or server-side lookup might be needed, but this is best effort client-side.
+            var timezoneAbbr = '';
+            try {
+                // Example: 'America/New_York'
+                var timezoneName = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+                // Try to extract a common abbreviation if possible, or use full name
+                var parts = timezoneName.split('/');
+                if (parts.length > 1) {
+                    timezoneAbbr = parts[parts.length - 1].replace(/_/g, ' '); // Use last part, replace underscores
+                } else {
+                    timezoneAbbr = timezoneName;
+                }
+                // Further refinement for common abbreviations (e.g., Eastern Daylight Time -> EDT)
+                // This is a simple lookup for common ones. More complex for all.
+                const commonAbbr = {
+                    "America/New_York": "EDT", "America/Detroit": "EDT", "America/Chicago": "CDT",
+                    "America/Los_Angeles": "PDT", "Europe/London": "BST", "Europe/Berlin": "CEST"
+                    // Add more as needed
+                };
+                if (commonAbbr[timezoneName]) {
+                    timezoneAbbr = commonAbbr[timezoneName];
+                }
+
+            } catch (e) {
+                // Browser might not support Intl.DateTimeFormat or other issues
+                console.error("Could not get client timezone:", e);
+            }
+
+            document.getElementById('live-clock').textContent = timeString + (timezoneAbbr ? ' ' + timezoneAbbr : '');
+        }
+
+        // Update the clock every second
+        setInterval(updateClock, 1000);
+        // Run once immediately to avoid initial delay
+        updateClock();
+    </script>
 
 </body>
 </html>
@@ -124,6 +372,6 @@ EOF
 
 # Set proper permissions for the generated HTML file
 chmod 644 "$OUTPUT_FILE"
-chown www-data:www-data "$OUTPUT_FILE" # Ensure Apache can read it
+chown www-data:www-data "$OUTPUT_FILE"
 
 echo "Generated '$OUTPUT_FILE' successfully."
