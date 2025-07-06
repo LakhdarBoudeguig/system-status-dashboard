@@ -84,7 +84,7 @@ cat <<EOF > "$OUTPUT_FILE"
 </head>
 <body>
 
-    <h1>Server Status - Generated Report</h1>
+    <h1>My System Status - Generated Report</h1>
     <hr>
 
     <p class="section-title">Disk Space Information (Root Filesystem)</p>
