@@ -1,0 +1,305 @@
+## Table of Contents
+
+1.  [Prerequisites](#1-prerequisites)
+2.  [Understanding the Script](#2-understanding-the-script)
+3.  [Setup Instructions](#3-setup-instructions)
+    * [Step 3.1: Prepare Your Apache Server](#step-31-prepare-your-apache-server)
+    * [Step 3.2: Create the Generation Script](#step-32-create-the-generation-script)
+    * [Step 3.3: Configure Apache Directory Index](#step-33-configure-apache-directory-index)
+    * [Step 3.4: Automate Script Execution with Cron](#step-34-automate-script-execution-with-cron)
+    * [Step 3.5: Configure Firewall (UFW)](#step-35-configure-firewall-ufw)
+4.  [Accessing the Dashboard](#4-accessing-the-dashboard)
+5.  [Troubleshooting](#5-troubleshooting)
+6.  [Customization](#6-customization)
+
+---
+
+## 1. Prerequisites
+
+Before you begin, ensure you have the following installed on your Ubuntu server:
+
+* **Apache2 Web Server:** This will serve the generated HTML file.
+* **Basic Linux utilities:** `df`, `grep`, `awk`, `uptime`, `whoami`,
+ `date`, `bc`, `cat`, `chmod`, `chown`. These are usually present by default on Ubuntu.
+* **`bc` (Basic Calculator):** Used for floating-point arithmetic in 
+the script. Install if missing:
+    ```bash
+    sudo apt update
+    sudo apt install bc
+    ```
+* **`nano` (or your preferred text editor):** For editing files.
+
+## 2. Understanding the Script (`generate_index.sh`)
+
+The core of this project is the `generate_index.sh` Bash script.
+
+* **Purpose:** It gathers various system statistics
+ (disk usage, memory, CPU info, uptime, current time) directly
+ from the server's operating system.
+* **Output:** It then dynamically generates a new `index.html`
+ file in Apache's web document root (`/var/www/html/`) with the
+ collected information.
+* **Execution:** This script is designed to be run periodically
+ by a system scheduler (like `cron`) rather than directly by Apache.
+
+## 3. Setup Instructions
+
+Follow these steps carefully to set up your real-time system status dashboard.
+
+### Step 3.1: Prepare Your Apache Server
+
+If Apache is not already installed, install it:
+
+```bash
+sudo apt update
+sudo apt install apache2
+Verify Apache is running on port 8080 (as per your setup):
+
+Bash
+
+sudo ss -tulnp | grep :8080
+You should see output similar to: tcp LISTEN ... *:8080 ... users:(("apache2",pid=XXXX,...))
+
+Step 3.2: Create the Generation Script
+Create a directory for your scripts (optional, but good practice):
+
+Bash
+
+mkdir -p ~/scripts
+Create the script file:
+
+Bash
+
+nano ~/scripts/generate_index.sh
+Paste the following content into the file.
+IMPORTANT: Replace SERVER_TIMEZONE="America/Detroit" with your
+ correct timezone if you are not in Westland, Michigan. You can
+ find a list of valid timezones here or by running timedatectl 
+list-timezones on your server.
+
+Bash
+
+#!/bin/bash
+
+# Configuration
+OUTPUT_FILE="/var/www/html/index.html" # The HTML file Apache will serve
+SERVER_TIMEZONE="America/Detroit" # Set your server's timezone for date output
+
+# --- Collect System Information ---
+
+# Date and Time
+CURRENT_DATE=$(TZ="$SERVER_TIMEZONE" date +"%A, %B %d %Y")
+CURRENT_TIME=$(TZ="$SERVER_TIMEZONE" date +"%H:%M:%S")
+
+# Disk Space (for /)
+DF_OUTPUT=$(df -B1 / | awk 'NR==2 {print $2, $3, $4, $5}')
+TOTAL_BYTES=$(echo "$DF_OUTPUT" | awk '{print $1}')
+USED_BYTES=$(echo "$DF_OUTPUT" | awk '{print $2}')
+AVAILABLE_BYTES=$(echo "$DF_OUTPUT" | awk '{print $3}')
+USAGE_PERCENTAGE=$(echo "$DF_OUTPUT" | awk '{print $4}' | sed 's/%//')
+
+TOTAL_SPACE_GB=$(echo "scale=2; $TOTAL_BYTES / (1024*1024*1024)" | bc)
+USED_SPACE_GB=$(echo "scale=2; $USED_BYTES / (1024*1024*1024)" | bc)
+AVAILABLE_SPACE_GB=$(echo "scale=2; $AVAILABLE_BYTES / (1024*1024*1024)" | bc)
+
+# Memory Information (from /proc/meminfo)
+MEMTOTAL_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+MEMAVAILABLE_KB=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+
+# CPU Information (from /proc/cpuinfo)
+NUM_PROCESSORS=$(grep -c ^processor /proc/cpuinfo)
+CPU_MHZ=$(grep "cpu MHz" /proc/cpuinfo | head -n 1 | awk '{print int($4)}')
+
+# System Uptime and Load Averages
+UPTIME_INFO=$(uptime)
+
+# Username of script runner (will be 'root' if run by cron as root)
+RUN_BY_USER=$(whoami)
+
+# --- Generate HTML Output ---
+cat <<EOF > "$OUTPUT_FILE"
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Server Status Report</title>
+    <meta http-equiv="refresh" content="60"> <style>
+        body {
+            font-family: monospace;
+            background-color: #222;
+            color: #eee;
+            margin: 20px;
+        }
+        pre {
+            background-color: #333;
+            border: 1px solid #555;
+            padding: 10px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        hr {
+            border: 0;
+            height: 1px;
+            background-image: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(255, 255, 255, 0.75), rgba(0, 0, 0, 0));
+            margin: 20px 0;
+        }
+        .section-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #0f0;
+            margin-bottom: 10px;
+        }
+        .usage-percentage {
+            color: #ff0;
+        }
+        footer {
+            margin-top: 30px;
+            font-size: 0.8em;
+            text-align: center;
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Server Status - Generated Report</h1>
+    <hr>
+
+    <p class="section-title">Disk Space Information (Root Filesystem)</p>
+    <pre>
+      Used Space       : ${USED_BYTES} bytes (${USED_SPACE_GB} GB)
+      Available Space  : ${AVAILABLE_BYTES} bytes (${AVAILABLE_SPACE_GB} GB)
+      <span class="usage-percentage">Usage Percentage : ${USAGE_PERCENTAGE}%</span>
+      Total disk space : ${TOTAL_BYTES} bytes (${TOTAL_SPACE_GB} GB)
+    </pre>
+    <hr>
+
+    <p class="section-title">Memory Information</p>
+    <pre>
+The system has ${NUM_PROCESSORS} Processors
+The average CPU speed is ${CPU_MHZ} MHz
+The system has ${MEMTOTAL_KB} kB of total memory
+The system has ${MEMAVAILABLE_KB} kB of available memory
+    </pre>
+    <hr>
+
+    <p class="section-title">System Uptime and Load Average</p>
+    <pre>
+${UPTIME_INFO}
+    </pre>
+    <hr>
+
+    <p>Run by: ${RUN_BY_USER}</p>
+    <hr>
+
+    <footer>
+        <p>Page assembled ${CURRENT_DATE} - ${CURRENT_TIME} ${SERVER_TIMEZONE_SHORT}</p>
+    </footer>
+
+</body>
+</html>
+EOF
+
+# Set proper permissions for the generated HTML file
+chmod 644 "$OUTPUT_FILE"
+chown www-data:www-data "$OUTPUT_FILE"
+
+echo "Generated '$OUTPUT_FILE' successfully."
+Save and exit the nano editor (Ctrl+X, then Y, then Enter).
+
+Make the script executable:
+
+Bash
+
+chmod +x ~/scripts/generate_index.sh
+Step 3.3: Configure Apache Directory Index
+Ensure Apache is configured to look for index.html as the
+ default page when a directory is requested.
+
+Edit the dir.conf file:
+
+Bash
+
+sudo nano /etc/apache2/mods-enabled/dir.conf
+Locate the DirectoryIndex line and ensure index.html 
+is listed, preferably first if it's the primary page you want served by default:
+
+Apache
+
+<IfModule mod_dir.c>
+    DirectoryIndex index.html index.php index.cgi index.pl index.xhtml index.htm
+</IfModule>
+Save and exit (Ctrl+X, Y, Enter).
+
+Restart Apache to apply the configuration changes:
+
+Bash
+
+sudo systemctl restart apache2
+Step 3.4: Automate Script Execution with Cron
+To make the dashboard "real-time," you need to run
+ the generate_index.sh script periodically using cron.
+
+Open the root user's crontab for editing:
+
+Bash
+
+sudo crontab -e
+(If prompted, select nano as your editor).
+
+Add the following line at the end of the file. This will run the script every minute.
+IMPORTANT: Replace your_username with your actual Linux username.
+
+Code snippet
+
+* * * * * /home/your_username/scripts/generate_index.sh >> 
+/var/log/sys_status_gen.log 2>&1
+* * * * *: This is the cron schedule for "every minute."
+
+>> /var/log/sys_status_gen.log 2>&1: This part redirects
+ all output (standard output and errors) from the script
+ to a log file. This is crucial for troubleshooting if the page isn't updating.
+
+If you prefer a different interval (e.g., every 5 minutes):
+
+Code snippet
+
+*/5 * * * * /home/your_username/scripts/generate_index.sh >> 
+/var/log/sys_status_gen.log 2>&1
+Save and exit (Ctrl+X, Y, Enter). You should see crontab: installing new crontab.
+
+Step 3.5: Configure Firewall (UFW)
+If you are using UFW (Uncomplicated Firewall), ensure 
+port 8080 is open to allow incoming web traffic to Apache.
+
+Allow traffic on port 8080:
+
+Bash
+
+sudo ufw allow 8080/tcp
+Check UFW status:
+
+Bash
+
+sudo ufw status
+You should see 8080/tcp ALLOW Anywhere (or similar) in the output.
+
+4. Accessing the Dashboard
+After completing all the setup steps, wait for at least one minute
+ (for the cron job to run the first time).
+
+Then, open your web browser and navigate to:
+
+If you are on the server itself:
+
+http://localhost:8080
+From another computer on your network or the internet:
+Replace YOUR_SERVER_IP_ADDRESS with your Ubuntu server's actual IP address.
+
+http://YOUR_SERVER_IP_ADDRESS:8080
+(You can find your server's IP address by running ip a or hostname -I 
+in your server's terminal.)
+
+You should now see your custom-designed system status page with updated information. 
+The page will automatically refresh every 60 seconds in your browser.
+
