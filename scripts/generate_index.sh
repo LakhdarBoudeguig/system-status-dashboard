@@ -7,50 +7,50 @@ SERVER_TIMEZONE="America/Detroit" # Set your server's timezone for date output
 # --- Collect System Information ---
 
 # Date and Time for server-side generated timestamp
-CURRENT_DATE=$(TZ="$SERVER_TIMEZONE" date +"%A, %B %d %Y")
-CURRENT_TIME=$(TZ="$SERVER_TIMEZONE" date +"%H:%M:%S")
+CURRENT_DATE=$(TZ="$SERVER_TIMEZONE" /usr/bin/date +"%A, %B %d %Y")
+CURRENT_TIME=$(TZ="$SERVER_TIMEZONE" /usr/bin/date +"%H:%M:%S")
 
 # Determine a short timezone abbreviation for display
-SERVER_TIMEZONE_SHORT=$(TZ="$SERVER_TIMEZONE" date +"%Z")
+SERVER_TIMEZONE_SHORT=$(TZ="$SERVER_TIMEZONE" /usr/bin/date +"%Z")
 
 # 1. Disk Space (for /) - Retaining previous full detail
-DF_OUTPUT_ROOT=$(df -B1 / | awk 'NR==2 {print $2, $3, $4, $5}')
-TOTAL_BYTES=$(echo "$DF_OUTPUT_ROOT" | awk '{print $1}')
-USED_BYTES=$(echo "$DF_OUTPUT_ROOT" | awk '{print $2}')
-AVAILABLE_BYTES=$(echo "$DF_OUTPUT_ROOT" | awk '{print $3}')
-USAGE_PERCENTAGE=$(echo "$DF_OUTPUT_ROOT" | awk '{print $4}' | sed 's/%//')
+DF_OUTPUT_ROOT=$(/usr/bin/df -B1 / | /usr/bin/awk 'NR==2 {print $2, $3, $4, $5}')
+TOTAL_BYTES=$(/usr/bin/echo "$DF_OUTPUT_ROOT" | /usr/bin/awk '{print $1}')
+USED_BYTES=$(/usr/bin/echo "$DF_OUTPUT_ROOT" | /usr/bin/awk '{print $2}')
+AVAILABLE_BYTES=$(/usr/bin/echo "$DF_OUTPUT_ROOT" | /usr/bin/awk '{print $3}')
+USAGE_PERCENTAGE=$(/usr/bin/echo "$DF_OUTPUT_ROOT" | /usr/bin/awk '{print $4}' | /usr/bin/sed 's/%//')
 
-TOTAL_SPACE_GB=$(echo "scale=2; $TOTAL_BYTES / (1024*1024*1024)" | bc)
-USED_SPACE_GB=$(echo "scale=2; $USED_BYTES / (1024*1024*1024)" | bc)
-AVAILABLE_SPACE_GB=$(echo "scale=2; $AVAILABLE_BYTES / (1024*1024*1024)" | bc)
+TOTAL_SPACE_GB=$(/usr/bin/echo "scale=2; $TOTAL_BYTES / (1024*1024*1024)" | /usr/bin/bc)
+USED_SPACE_GB=$(/usr/bin/echo "scale=2; $USED_BYTES / (1024*1024*1024)" | /usr/bin/bc)
+AVAILABLE_SPACE_GB=$(/usr/bin/echo "scale=2; $AVAILABLE_BYTES / (1024*1024*1024)" | /usr/bin/bc)
 
 
 # 2. Memory Information (from /proc/meminfo) - Specific request: Total, Available, Used
-MEMTOTAL_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-MEMAVAILABLE_KB=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+MEMTOTAL_KB=$(/usr/bin/grep MemTotal /proc/meminfo | /usr/bin/awk '{print $2}')
+MEMAVAILABLE_KB=$(/usr/bin/grep MemAvailable /proc/meminfo | /usr/bin/awk '{print $2}')
 MEMUSED_KB=$((MEMTOTAL_KB - MEMAVAILABLE_KB)) # Calculated used memory
 
 # Convert to MB for display
-MEMTOTAL_MB=$(echo "scale=2; $MEMTOTAL_KB / 1024" | bc)
-MEMAVAILABLE_MB=$(echo "scale=2; $MEMAVAILABLE_KB / 1024" | bc)
-MEMUSED_MB=$(echo "scale=2; $MEMUSED_KB / 1024" | bc)
+MEMTOTAL_MB=$(/usr/bin/echo "scale=2; $MEMTOTAL_KB / 1024" | /usr/bin/bc)
+MEMAVAILABLE_MB=$(/usr/bin/echo "scale=2; $MEMAVAILABLE_KB / 1024" | /usr/bin/bc)
+MEMUSED_MB=$(/usr/bin/echo "scale=2; $MEMUSED_KB / 1024" | /usr/bin/bc)
 
 
 # 3. CPU Information (from /proc/cpuinfo) - Retained
-NUM_PROCESSORS=$(grep -c ^processor /proc/cpuinfo)
-CPU_MHZ=$(grep "cpu MHz" /proc/cpuinfo | head -n 1 | awk '{print int($4)}')
+NUM_PROCESSORS=$(/usr/bin/grep -c ^processor /proc/cpuinfo)
+CPU_MHZ=$(/usr/bin/grep "cpu MHz" /proc/cpuinfo | /usr/bin/head -n 1 | /usr/bin/awk '{print int($4)}')
 
 
 # 4. System Uptime and Load Averages - Retained
-UPTIME_INFO=$(uptime)
+UPTIME_INFO=$(/usr/bin/uptime)
 
 
 # 5. User Logins (Past 5 Days)
 USER_LOGIN_DATA="No user logins recorded in the past 5 days, or 'last' command output not available."
 
-if command -v last &> /dev/null
+if /usr/bin/command -v last &> /dev/null
 then
-    LOGIN_RAW=$(last -F -s -5days | grep -Ev "wtmp|reboot|shutdown|system boot" | head -n 20) # Limit to 20 recent logins
+    LOGIN_RAW=$(/usr/bin/last -F -s -5days | /usr/bin/grep -Ev "wtmp|reboot|shutdown|system boot" | /usr/bin/head -n 20) # Limit to 20 recent logins
 
     if [ -n "$LOGIN_RAW" ]; then
         USER_LOGIN_DATA="<table style=\"width:100%; border-collapse: collapse; table-layout: fixed;\">" # Added table-layout: fixed
@@ -62,26 +62,26 @@ then
         USER_LOGIN_DATA+="</tr></thead><tbody>"
 
         while IFS= read -r line; do
-            user=$(echo "$line" | awk '{print $1}')
-            tty=$(echo "$line" | awk '{print $2}')
+            user=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $1}')
+            tty=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $2}')
             # Logic to find the IP/Hostname
-            from=$(echo "$line" | awk '{
+            from=$(/usr/bin/echo "$line" | /usr/bin/awk '{
                 if ($3 ~ /\./ || $3 == ":0" || $3 == ":1") { print $3 }
                 else if ($4 ~ /\./ || $4 == ":0" || $4 == ":1") { print $4 }
                 else { print $3 } # Default to $3 if no clear IP
             }')
             display_from="${tty} (${from})"
 
-            login_time_full=$(echo "$line" | awk '{
+            login_time_full=$(/usr/bin/echo "$line" | /usr/bin/awk '{
                 for (i=5; i<=NF; i++) {
                     if ($i ~ /^[0-9]{4}$/) { # Found year
-                        for (j=i-4; j<=i; j++) printf "%s ", $j;
+                        for (j=i-4; j<=i; j++) /usr/bin/printf "%s ", $j;
                         exit;
                     }
                 }
-            }' | xargs)
+            }' | /usr/bin/xargs)
 
-            logout_info=$(echo "$line" | awk '{
+            logout_info=$(/usr/bin/echo "$line" | /usr/bin/awk '{
                 logout_start_idx = 0;
                 for (i=5; i<=NF; i++) {
                     if ($i ~ /^[0-9]{4}$/) { # Found year, next is logout info start
@@ -90,17 +90,17 @@ then
                     }
                 }
                 if (logout_start_idx > 0) {
-                    for (i=logout_start_idx; i<=NF; i++) printf "%s ", $i;
+                    for (i=logout_start_idx; i<=NF; i++) /usr/bin/printf "%s ", $i;
                 } else {
                     print "N/A";
                 }
-            }' | xargs)
+            }' | /usr/bin/xargs)
 
             # Escape HTML special characters
-            user=$(echo "$user" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
-            display_from=$(echo "$display_from" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
-            login_time_full=$(echo "$login_time_full" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
-            logout_info=$(echo "$logout_info" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            user=$(/usr/bin/echo "$user" | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            display_from=$(/usr/bin/echo "$display_from" | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            login_time_full=$(/usr/bin/echo "$login_time_full" | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            logout_info=$(/usr/bin/echo "$logout_info" | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 
             USER_LOGIN_DATA+="<tr>"
             USER_LOGIN_DATA+="<td style=\"padding: 8px; border: 1px solid #555;\">${user}</td>"
@@ -119,7 +119,7 @@ fi
 # 6. Active Disk Information - Mounted Filesystems (including swap)
 ACTIVE_DISK_INFO_HTML="<p>No active disk information found or suitable devices.</p>"
 
-DF_ALL_OUTPUT=$(df -hT --output=source,used,pcent,fstype,target 2>/dev/null | tail -n +2)
+DF_ALL_OUTPUT=$(/usr/bin/df -hT --output=source,used,pcent,fstype,target 2>/dev/null | /usr/bin/tail -n +2)
 
 if [ -n "$DF_ALL_OUTPUT" ]; then
     ACTIVE_DISK_INFO_HTML="<table style=\"width:100%; border-collapse: collapse; table-layout: fixed;\">" # Added table-layout: fixed
@@ -129,12 +129,12 @@ if [ -n "$DF_ALL_OUTPUT" ]; then
     ACTIVE_DISK_INFO_HTML+="<th style=\"padding: 8px; border: 1px solid #555; text-align: right; width: 30%;\">Usage %</th>"
     ACTIVE_DISK_INFO_HTML+="</tr></thead><tbody>"
 
-    echo "$DF_ALL_OUTPUT" | while IFS= read -r line; do
-        DEVICE=$(echo "$line" | awk '{print $1}')
-        USED=$(echo "$line" | awk '{print $3}')
-        PERCENT=$(echo "$line" | awk '{print $4}')
-        FSTYPE=$(echo "$line" | awk '{print $2}')
-        MOUNT_POINT=$(echo "$line" | awk '{print $5}')
+    /usr/bin/echo "$DF_ALL_OUTPUT" | while IFS= read -r line; do
+        DEVICE=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $1}')
+        USED=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $3}')
+        PERCENT=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $4}')
+        FSTYPE=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $2}')
+        MOUNT_POINT=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $5}')
 
         if [[ "$FSTYPE" != "tmpfs" && \
               "$FSTYPE" != "devtmpfs" && \
@@ -158,15 +158,16 @@ if [ -n "$DF_ALL_OUTPUT" ]; then
     done
     
     # Add swap information
-    SWAP_INFO=$(swapon -s)
+    # Note: swapon might be in /sbin or /usr/sbin. Adjust path if necessary.
+    SWAP_INFO=$(/usr/sbin/swapon -s) # Common path for swapon on Ubuntu
     if [ -n "$SWAP_INFO" ]; then
-        echo "$SWAP_INFO" | tail -n +2 | while IFS= read -r line; do
-            SWAP_DEVICE=$(echo "$line" | awk '{print $1}')
-            SWAP_USED_KB=$(echo "$line" | awk '{print $3}')
-            SWAP_TOTAL_KB=$(echo "$line" | awk '{print $2}')
+        /usr/bin/echo "$SWAP_INFO" | /usr/bin/tail -n +2 | while IFS= read -r line; do
+            SWAP_DEVICE=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $1}')
+            SWAP_USED_KB=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $3}')
+            SWAP_TOTAL_KB=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $2}')
             
             if [ "$SWAP_TOTAL_KB" -gt 0 ]; then
-                SWAP_PERCENT=$(echo "scale=0; ($SWAP_USED_KB * 100) / $SWAP_TOTAL_KB" | bc)
+                SWAP_PERCENT=$(/usr/bin/echo "scale=0; ($SWAP_USED_KB * 100) / $SWAP_TOTAL_KB" | /usr/bin/bc)
             else
                 SWAP_PERCENT="0"
             fi
@@ -184,7 +185,7 @@ fi
 
 
 # 7. Recent Apache Access Log Entries
-LAST_ACCESS_LOGS=$(tail -n 10 /var/log/apache2/access.log 2>/dev/null | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+LAST_ACCESS_LOGS=$(/usr/bin/tail -n 10 /var/log/apache2/access.log 2>/dev/null | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 
 if [ -z "$LAST_ACCESS_LOGS" ]; then
     LAST_ACCESS_LOGS="<p>No recent Apache access log entries found or log file is inaccessible.</p>"
@@ -192,11 +193,11 @@ fi
 
 
 # Username of script runner (will be 'root' if run by cron as root) - Retained
-RUN_BY_USER=$(whoami)
+RUN_BY_USER=$(/usr/bin/whoami)
 
 
 # --- Generate HTML Output ---
-cat <<EOF > "$OUTPUT_FILE"
+/usr/bin/cat <<EOF > "$OUTPUT_FILE"
 <!DOCTYPE html>
 <html>
 <head>
@@ -326,43 +327,32 @@ ${UPTIME_INFO}
             var seconds = String(now.getSeconds()).padStart(2, '0');
             var timeString = hours + ':' + minutes + ':' + seconds;
 
-            // Attempt to get the client's timezone abbreviation.
-            // Note: This can be tricky and might not always produce the desired short abbreviation like 'EDT'.
-            // For full accuracy, a library or server-side lookup might be needed, but this is best effort client-side.
             var timezoneAbbr = '';
             try {
-                // Example: 'America/New_York'
                 var timezoneName = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-                // Try to extract a common abbreviation if possible, or use full name
-                var parts = timezoneName.split('/');
-                if (parts.length > 1) {
-                    timezoneAbbr = parts[parts.length - 1].replace(/_/g, ' '); // Use last part, replace underscores
-                } else {
-                    timezoneAbbr = timezoneName;
-                }
-                // Further refinement for common abbreviations (e.g., Eastern Daylight Time -> EDT)
-                // This is a simple lookup for common ones. More complex for all.
                 const commonAbbr = {
                     "America/New_York": "EDT", "America/Detroit": "EDT", "America/Chicago": "CDT",
                     "America/Los_Angeles": "PDT", "Europe/London": "BST", "Europe/Berlin": "CEST"
-                    // Add more as needed
                 };
                 if (commonAbbr[timezoneName]) {
                     timezoneAbbr = commonAbbr[timezoneName];
+                } else {
+                     // Fallback to a simpler extraction or just the full name if not in commonAbbr
+                     var parts = timezoneName.split('/');
+                     if (parts.length > 1) {
+                         timezoneAbbr = parts[parts.length - 1].replace(/_/g, ' ');
+                     } else {
+                         timezoneAbbr = timezoneName;
+                     }
                 }
-
             } catch (e) {
-                // Browser might not support Intl.DateTimeFormat or other issues
                 console.error("Could not get client timezone:", e);
             }
 
             document.getElementById('live-clock').textContent = timeString + (timezoneAbbr ? ' ' + timezoneAbbr : '');
         }
 
-        // Update the clock every second
         setInterval(updateClock, 1000);
-        // Run once immediately to avoid initial delay
         updateClock();
     </script>
 
@@ -371,7 +361,7 @@ ${UPTIME_INFO}
 EOF
 
 # Set proper permissions for the generated HTML file
-chmod 644 "$OUTPUT_FILE"
-chown www-data:www-data "$OUTPUT_FILE"
+/usr/bin/chmod 644 "$OUTPUT_FILE"
+/usr/bin/chown www-data:www-data "$OUTPUT_FILE"
 
-echo "Generated '$OUTPUT_FILE' successfully."
+/usr/bin/echo "Generated '$OUTPUT_FILE' successfully."
