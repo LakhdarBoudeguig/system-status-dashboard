@@ -43,7 +43,7 @@ cat <<EOF > "$OUTPUT_FILE"
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Server Status Report</title>
+    <title>My System  Status Report</title>
     <meta http-equiv="refresh" content="60"> <style>
         body {
             font-family: monospace;
