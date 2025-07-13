@@ -1,7 +1,9 @@
 #!/bin/bash
 
 # Configuration
-OUTPUT_FILE="/var/www/html/index.html" # The HTML file Apache will serve
+# Path where the HTML file will be generated.
+# Ensure this directory exists or will be created by the script.
+OUTPUT_FILE="/var/www/html/index.html" # Assuming this is the correct target path
 SERVER_TIMEZONE="America/Detroit" # Set your server's timezone for date output
 
 # --- Collect System Information ---
@@ -36,13 +38,19 @@ MEMAVAILABLE_MB=$(/usr/bin/echo "scale=2; $MEMAVAILABLE_KB / 1024" | /usr/bin/bc
 MEMUSED_MB=$(/usr/bin/echo "scale=2; $MEMUSED_KB / 1024" | /usr/bin/bc)
 
 
-# 3. CPU Information (from /proc/cpuinfo) - Retained
-NUM_PROCESSORS=$(/usr/bin/grep -c ^processor /proc/cpuinfo)
-CPU_MHZ=$(/usr/bin/grep "cpu MHz" /proc/cpuinfo | /usr/bin/head -n 1 | /usr/bin/awk '{print int($4)}')
+# 3. CPU Information (from /proc/cpuinfo)
+# *** ADDED tr -d '\n\r ' for clean output ***
+NUM_PROCESSORS=$(/usr/bin/grep -c ^processor /proc/cpuinfo | tr -d '\n\r ')
+CPU_MHZ=$(/usr/bin/grep "cpu MHz" /proc/cpuinfo | /usr/bin/head -n 1 | /usr/bin/awk '{print int($4)}' | tr -d '\n\r ')
 
 
-# 4. System Uptime and Load Averages - Retained
+# 4. System Uptime and Load Averages
 UPTIME_INFO=$(/usr/bin/uptime)
+# Extract load averages from uptime info
+# *** ADDED tr -d '\n\r ' for clean output ***
+LOAD_1=$(/usr/bin/echo "$UPTIME_INFO" | /usr/bin/awk -F'load average: ' '{print $2}' | /usr/bin/awk '{print $1}' | /usr/bin/sed 's/,//' | tr -d '\n\r ')
+LOAD_5=$(/usr/bin/echo "$UPTIME_INFO" | /usr/bin/awk -F'load average: ' '{print $2}' | /usr/bin/awk '{print $2}' | /usr/bin/sed 's/,//' | tr -d '\n\r ')
+LOAD_15=$(/usr/bin/echo "$UPTIME_INFO" | /usr/bin/awk -F'load average: ' '{print $2}' | /usr/bin/awk '{print $3}' | tr -d '\n\r ')
 
 
 # 5. User Logins (Past 5 Days)
@@ -75,7 +83,7 @@ then
             login_time_full=$(/usr/bin/echo "$line" | /usr/bin/awk '{
                 for (i=5; i<=NF; i++) {
                     if ($i ~ /^[0-9]{4}$/) { # Found year
-                        for (j=i-4; j<=i; j++) /usr/bin/printf "%s ", $j;
+                        for (j=i-4; j<=i; j++) printf "%s ", $j;
                         exit;
                     }
                 }
@@ -90,7 +98,7 @@ then
                     }
                 }
                 if (logout_start_idx > 0) {
-                    for (i=logout_start_idx; i<=NF; i++) /usr/bin/printf "%s ", $i;
+                    for (i=logout_start_idx; i<=NF; i++) printf "%s ", $i;
                 } else {
                     print "N/A";
                 }
@@ -156,7 +164,7 @@ if [ -n "$DF_ALL_OUTPUT" ]; then
             ACTIVE_DISK_INFO_HTML+="</tr>"
         fi
     done
-    
+
     # Add swap information
     # Note: swapon might be in /sbin or /usr/sbin. Adjust path if necessary.
     SWAP_INFO=$(/usr/sbin/swapon -s) # Common path for swapon on Ubuntu
@@ -165,13 +173,13 @@ if [ -n "$DF_ALL_OUTPUT" ]; then
             SWAP_DEVICE=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $1}')
             SWAP_USED_KB=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $3}')
             SWAP_TOTAL_KB=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $2}')
-            
+
             if [ "$SWAP_TOTAL_KB" -gt 0 ]; then
                 SWAP_PERCENT=$(/usr/bin/echo "scale=0; ($SWAP_USED_KB * 100) / $SWAP_TOTAL_KB" | /usr/bin/bc)
             else
                 SWAP_PERCENT="0"
             fi
-            
+
             ACTIVE_DISK_INFO_HTML+="<tr>"
             ACTIVE_DISK_INFO_HTML+="<td style=\"padding: 8px; border: 1px solid #555;\">${SWAP_DEVICE} (swap)</td>"
             ACTIVE_DISK_INFO_HTML+="<td style=\"padding: 8px; border: 1px solid #555; text-align: right;\">${SWAP_USED_KB}K</td>"
@@ -192,17 +200,24 @@ if [ -z "$LAST_ACCESS_LOGS" ]; then
 fi
 
 
-# Username of script runner (will be 'root' if run by cron as root) - Retained
+# Username of script runner (will be 'root' if run by cron as root)
 RUN_BY_USER=$(/usr/bin/whoami)
 
 
 # --- Generate HTML Output ---
+
+# Create the output directory if it doesn't exist
+mkdir -p "$(dirname "$OUTPUT_FILE")"
+
+# IMPORTANT: The 'EOF' is quoted to prevent bash from interpreting '$' inside the HTML/JS block.
 /usr/bin/cat <<EOF > "$OUTPUT_FILE"
 <!DOCTYPE html>
 <html>
 <head>
     <title>Server Status Report</title>
-    <meta http-equiv="refresh" content="60"> <style>
+    <meta http-equiv="refresh" content="60">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
         body {
             font-family: monospace;
             background-color: #222;
@@ -243,6 +258,41 @@ RUN_BY_USER=$(/usr/bin/whoami)
             color: #0f0;
             margin-bottom: 10px;
         }
+
+    /* CPU Load Visualizer Styles */
+    .cpu-visualizer-container {
+        display: flex;
+        justify-content: center; /* Center the cores horizontally */
+        align-items: flex-end; /* Align cores to the bottom */
+        gap: 5px; /* Space between core bars */
+        height: 100px; /* Fixed height for the visualization */
+        margin-top: 15px;
+        margin-bottom: 25px;
+    }
+
+    .cpu-core-bar {
+        width: 20px; /* Width of each core bar */
+        height: 100%; /* Take full height of container */
+        background-color: #333; /* Background color of empty part of the core */
+        border: 1px solid #555;
+        position: relative;
+        overflow: hidden; /* Hide overflow of fill */
+        border-radius: 3px; /* Slightly rounded corners */
+    }
+
+    .cpu-core-fill {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        transition: height 0.5s ease-out, background-color 0.5s ease-out; /* Smooth transition for fill */
+        border-radius: 2px; /* Slightly rounded corners */
+    }
+
+    /* Color ranges for CPU fill */
+    .cpu-fill-low { background-color: #0f0; } /* Green */
+    .cpu-fill-medium { background-color: #ff0; } /* Yellow */
+    .cpu-fill-high { background-color: #f00; } /* Red */
         .usage-percentage {
             color: #ff0;
         }
@@ -268,19 +318,30 @@ RUN_BY_USER=$(/usr/bin/whoami)
 
     <p class="section-title">Memory Information</p>
     <pre>
-Total Memory      : ${MEMTOTAL_MB} MB
-Available Memory  : ${MEMAVAILABLE_MB} MB
-Used Memory       : ${MEMUSED_MB} MB
+Total Memory        : ${MEMTOTAL_MB} MB
+Available Memory    : ${MEMAVAILABLE_MB} MB
+Used Memory         : ${MEMUSED_MB} MB
     </pre>
     <hr>
 
     <p class="section-title">Disk Space Information (Root Filesystem)</p>
-    <pre>
+    <div style="display: flex; flex-wrap: wrap; justify-content: space-around; align-items: center; margin-bottom: 20px">
+        <div style="flex: 1; min-width: 300px; max-width: 400px; padding: 10px; box-sizing: border-box;">
+            <canvas id="diskSpaceChart"
+                    data-total="${TOTAL_SPACE_GB}"
+                    data-used="${USED_SPACE_GB}"
+                    data-available="${AVAILABLE_SPACE_GB}">
+            </canvas>
+        </div>
+        <div style="flex: 1; min-width: 300px; padding: 10px; box-sizing: border-box;">
+            <pre style="white-space: pre-wrap; word-wrap: break-word;">
       Used Space       : ${USED_BYTES} bytes (${USED_SPACE_GB} GB)
       Available Space  : ${AVAILABLE_BYTES} bytes (${AVAILABLE_SPACE_GB} GB)
       <span class="usage-percentage">Usage Percentage : ${USAGE_PERCENTAGE}%</span>
       Total disk space : ${TOTAL_BYTES} bytes (${TOTAL_SPACE_GB} GB)
-    </pre>
+            </pre>
+        </div>
+    </div>
     <hr>
 
     <p class="section-title">Active Disk Information (Mounted Filesystems and Swap)</p>
@@ -292,9 +353,16 @@ Used Memory       : ${MEMUSED_MB} MB
     <hr>
 
     <p class="section-title">CPU Information</p>
+    <div class="cpu-visualizer-container"
+          data-processors="${NUM_PROCESSORS}"
+          data-load1="${LOAD_1}"
+          data-load5="${LOAD_5}"
+          data-load15="${LOAD_15}">
+        </div>
     <pre>
 The system has ${NUM_PROCESSORS} Processors
 The average CPU speed is ${CPU_MHZ} MHz
+Load Average (1m, 5m, 15m): ${LOAD_1}, ${LOAD_5}, ${LOAD_15}
     </pre>
     <hr>
 
@@ -317,6 +385,144 @@ ${UPTIME_INFO}
         <p>Page generated on server: ${CURRENT_DATE} - ${CURRENT_TIME} ${SERVER_TIMEZONE_SHORT}</p>
         <p>Current time (your browser): <span id="live-clock"></span></p>
     </footer>
+
+    <script>
+    // Disk Space Pie Chart
+    document.addEventListener('DOMContentLoaded', function() {
+        var ctx = document.getElementById('diskSpaceChart').getContext('2d');
+        var canvasElement = document.getElementById('diskSpaceChart');
+
+        // Retrieve data from data attributes
+        var totalSpace = parseFloat(canvasElement.dataset.total);
+        var usedSpace = parseFloat(canvasElement.dataset.used);
+        var availableSpace = parseFloat(canvasElement.dataset.available);
+
+        var diskSpaceChart = new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: ['Used Space', 'Available Space'],
+                datasets: [{
+                    data: [usedSpace, availableSpace],
+                    backgroundColor: [
+                        'rgba(255, 99, 132, 0.8)', // Red for Used
+                        'rgba(75, 192, 192, 0.8)' // Green for Available
+                    ],
+                    borderColor: [
+                        'rgba(255, 99, 132, 1)',
+                        'rgba(75, 192, 192, 1)'
+                    ],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom', // Position legend below the chart
+                        labels: {
+                            color: '#eee' // Adjust legend label color for dark theme
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: 'Root Filesystem Usage',
+                        color: '#0f0' // Title color for dark theme
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.parsed !== null) {
+                                    label += context.parsed.toFixed(2) + ' GB';
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    });
+</script>
+<script>
+    // CPU Core Load Visualizer
+    document.addEventListener('DOMContentLoaded', function() {
+        var container = document.querySelector('.cpu-visualizer-container');
+        var numProcessors = parseInt(container.dataset.processors);
+        var load1 = parseFloat(container.dataset.load1);
+        // var load5 = parseFloat(container.dataset.load5); // Not directly used in this specific visualization but available
+        // var load15 = parseFloat(container.dataset.load15); // Not directly used in this specific visualization but available
+
+        // --- ADDED DEBUGGING LINES ---
+        console.log("CPU Visualizer Debug Info:");
+        console.log("  numProcessors from data:", container.dataset.processors, "Parsed as:", numProcessors, "Type:", typeof numProcessors);
+        console.log("  load1 from data:", container.dataset.load1, "Parsed as:", load1, "Type:", typeof load1);
+        if (isNaN(numProcessors) || isNaN(load1)) {
+            console.error("  ERROR: CPU Visualizer received invalid numeric data (NaN found). Check Bash script output and HTML data attributes.");
+        }
+        // --- END DEBUGGING LINES ---
+
+        // Use the 1-minute load average for the primary visualizer
+        var currentLoad = load1;
+
+        // Generate CPU core bars
+        for (let i = 0; i < numProcessors; i++) {
+            var coreBar = document.createElement('div');
+            coreBar.className = 'cpu-core-bar';
+
+            var coreFill = document.createElement('div');
+            coreFill.className = 'cpu-core-fill';
+
+            let fillPercentage;
+            let loadForThisCore = currentLoad - i; // How much load is left for this specific core
+
+            if (loadForThisCore <= 0) {
+                fillPercentage = 0; // This core is not loaded
+            } else if (loadForThisCore >= 1) {
+                fillPercentage = 100; // This core is fully loaded
+            } else {
+                fillPercentage = loadForThisCore * 100; // This core is partially loaded
+            }
+
+            coreFill.style.height = fillPercentage + '%';
+
+            // Determine color based on load for this specific core or overall for simplicity
+            if (fillPercentage > 80) {
+                coreFill.classList.add('cpu-fill-high');
+            } else if (fillPercentage > 40) {
+                coreFill.classList.add('cpu-fill-medium');
+            } else {
+                coreFill.classList.add('cpu-fill-low');
+            }
+
+            coreBar.appendChild(coreFill);
+            container.appendChild(coreBar);
+        }
+
+        // Optional: Add an "overflow" indicator if load exceeds cores
+        if (currentLoad > numProcessors) {
+            var overflowIndicator = document.createElement('div');
+            overflowIndicator.style.cssText = `
+                width: 30px;
+                height: 20px;
+                background-color: #f00;
+                color: white;
+                text-align: center;
+                line-height: 20px;
+                font-size: 0.8em;
+                font-weight: bold;
+                border-radius: 3px;
+                margin-left: 10px;
+            `;
+            overflowIndicator.textContent = `${(currentLoad - numProcessors).toFixed(1)}`;
+            container.appendChild(overflowIndicator);
+        }
+    });
+</script>
 
     <script>
         // JavaScript to update a live clock in the browser
@@ -362,6 +568,6 @@ EOF
 
 # Set proper permissions for the generated HTML file
 /usr/bin/chmod 644 "$OUTPUT_FILE"
-/usr/bin/chown www-data:www-data "$OUTPUT_FILE"
+# Removed chown www-data:www-data "$OUTPUT_FILE" for non-root execution simplicity.
 
 /usr/bin/echo "Generated '$OUTPUT_FILE' successfully."
