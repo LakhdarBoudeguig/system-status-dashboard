@@ -1,3 +1,33 @@
+A comprehensive READ.ME that accurately reflects all the enhancements and fixes we've implemented in our system status dashboard project.
+
+This version will include details about:
+
+Memory usage calculation (used MB)
+
+CPU load averages
+
+CPU Load Visualizer (JS-driven)
+
+Disk space pie chart (Chart.js)
+
+Active disk information table (mounted filesystems and swap)
+
+User login history table
+
+Recent Apache access logs
+
+Client-side live clock
+
+Crucially, the updated generate_index.sh script with all the necessary Bash and JavaScript escaping for correct rendering.
+
+Here is the updated README.md content. You can copy and paste this entirely into your README.md file.
+
+Markdown
+
+# Real-Time System Status Dashboard
+
+This project provides a simple, web-based dashboard to monitor the real-time (updated every minute) status of your Ubuntu server. It uses a Bash script to collect system information and dynamically generates an HTML file, which is then served by an Apache web server.
+
 ## Table of Contents
 
 1.  [Prerequisites](#1-prerequisites)
@@ -19,13 +49,11 @@
 Before you begin, ensure you have the following installed on your Ubuntu server:
 
 * **Apache2 Web Server:** This will serve the generated HTML file.
-* **Basic Linux utilities:** `df`, `grep`, `awk`, `uptime`, `whoami`,
- `date`, `bc`, `cat`, `chmod`, `chown`. These are usually present by default on Ubuntu.
-* **`bc` (Basic Calculator):** Used for floating-point arithmetic in 
-the script. Install if missing:
+* **Basic Linux utilities:** `df`, `grep`, `awk`, `uptime`, `whoami`, `date`, `bc`, `cat`, `chmod`, `chown`, `tail`, `sed`, `head`, `xargs`, `swapon` (from `util-linux`). Most are usually present by default on Ubuntu.
+* **`bc` (Basic Calculator):** Used for floating-point arithmetic in the script. Install if missing:
     ```bash
     sudo apt update
-    sudo apt install bc
+    sudo apt install -y bc
     ```
 * **`nano` (or your preferred text editor):** For editing files.
 
@@ -33,14 +61,22 @@ the script. Install if missing:
 
 The core of this project is the `generate_index.sh` Bash script.
 
-* **Purpose:** It gathers various system statistics
- (disk usage, memory, CPU info, uptime, current time) directly
- from the server's operating system.
-* **Output:** It then dynamically generates a new `index.html`
- file in Apache's web document root (`/var/www/html/`) with the
- collected information.
-* **Execution:** This script is designed to be run periodically
- by a system scheduler (like `cron`) rather than directly by Apache.
+* **Purpose:** It gathers various system statistics directly from the server's operating system.
+    * **Disk Usage:** For the root filesystem (`/`), including total, used, available space in GB, and usage percentage, displayed with a **Chart.js pie chart**.
+    * **Memory Information:** Total, available, and **calculated used memory** in MB.
+    * **CPU Information:** Number of processors, CPU speed (MHz), **1, 5, and 15-minute load averages**. Includes a **visualizer for CPU core load**.
+    * **System Uptime:** Standard `uptime` command output.
+    * **Active Disk Information:** A table showing mounted filesystems (excluding common virtual/temporary ones) and **swap usage**.
+    * **User Logins:** A table listing recent user logins (past 5 days) using the `last` command.
+    * **Apache Access Logs:** The last 10 entries from `/var/log/apache2/access.log`.
+    * **Server Time:** Current date and time on the server.
+    * **Script Runner:** The username that executed the script.
+* **Output:** It then dynamically generates a new `index.html` file in Apache's web document root (`/var/www/html/`).
+* **Dynamic Elements:** The generated `index.html` includes client-side JavaScript for:
+    * A **live clock** showing the browser's current time and timezone.
+    * The **Chart.js disk space pie chart**.
+    * The **CPU load visualizer**.
+* **Execution:** This script is designed to be run periodically by a system scheduler (`cron`) to keep the dashboard updated.
 
 ## 3. Setup Instructions
 
@@ -52,77 +88,267 @@ If Apache is not already installed, install it:
 
 ```bash
 sudo apt update
-sudo apt install apache2
-Verify Apache is running on port 8080 (as per your setup):
+sudo apt install -y apache2
+By default, Apache listens on port 80. If you have configured it to listen on port 8080 (as might be the case in some setups), verify it:
 
 Bash
 
 sudo ss -tulnp | grep :8080
-You should see output similar to: tcp LISTEN ... *:8080 ... users:(("apache2",pid=XXXX,...))
+You should see output similar to: tcp    LISTEN ... *:8080 ... users:(("apache2",pid=XXXX,...))
 
 Step 3.2: Create the Generation Script
 Create a directory for your scripts (optional, but good practice):
 
 Bash
 
-mkdir -p ~/scripts
+mkdir -p ~/my-system-status-dashboard/scripts
+Navigate into the directory:
+
+Bash
+
+cd ~/my-system-status-dashboard/scripts
 Create the script file:
 
 Bash
 
-nano ~/scripts/generate_index.sh
-Paste the following content into the file.
-IMPORTANT: Replace SERVER_TIMEZONE="America/Detroit" with your
- correct timezone if you are not in Westland, Michigan. You can
- find a list of valid timezones here or by running timedatectl 
-list-timezones on your server.
+nano generate_index.sh
+Paste the ENTIRE content of the script below into the file.
+IMPORTANT: Replace SERVER_TIMEZONE="America/Detroit" with your correct timezone if you are not in Westland, Michigan. You can find a list of valid timezones by running timedatectl list-timezones on your server.
+
+Understanding important parts of the script below:
+
+Full Paths: Commands like /usr/bin/df are used to ensure the script runs reliably in cron environments.
+
+Data Cleaning: tr -d '\n\r ' is used extensively to remove unwanted whitespace and newlines from command outputs, which can cause issues when data is passed to JavaScript.
+
+Here Document (Bash HTML Generation): The cat <<EOF > "$OUTPUT_FILE" syntax is crucial.
+
+EOF is NOT quoted to allow Bash variables (like ${MEMTOTAL_MB}) to be expanded.
+
+Backticks (`) and Dollar Signs ($) inside JavaScript template literals are escaped (\`` and ${`) to prevent Bash from interpreting them as its own command substitutions or variable expansions. This is essential for the JavaScript to be written correctly into the HTML.
 
 Bash
 
 #!/bin/bash
 
 # Configuration
-OUTPUT_FILE="/var/www/html/index.html" # The HTML file Apache will serve
+# Path where the HTML file will be generated.
+# Ensure this directory exists or will be created by the script.
+OUTPUT_FILE="/var/www/html/index.html" # Assuming this is the correct target path for Apache
 SERVER_TIMEZONE="America/Detroit" # Set your server's timezone for date output
 
 # --- Collect System Information ---
 
-# Date and Time
-CURRENT_DATE=$(TZ="$SERVER_TIMEZONE" date +"%A, %B %d %Y")
-CURRENT_TIME=$(TZ="$SERVER_TIMEZONE" date +"%H:%M:%S")
+# Date and Time for server-side generated timestamp
+CURRENT_DATE=$(TZ="$SERVER_TIMEZONE" /usr/bin/date +"%A, %B %d %Y")
+CURRENT_TIME=$(TZ="$SERVER_TIMEZONE" /usr/bin/date +"%H:%M:%S")
 
-# Disk Space (for /)
-DF_OUTPUT=$(df -B1 / | awk 'NR==2 {print $2, $3, $4, $5}')
-TOTAL_BYTES=$(echo "$DF_OUTPUT" | awk '{print $1}')
-USED_BYTES=$(echo "$DF_OUTPUT" | awk '{print $2}')
-AVAILABLE_BYTES=$(echo "$DF_OUTPUT" | awk '{print $3}')
-USAGE_PERCENTAGE=$(echo "$DF_OUTPUT" | awk '{print $4}' | sed 's/%//')
+# Determine a short timezone abbreviation for display
+SERVER_TIMEZONE_SHORT=$(TZ="$SERVER_TIMEZONE" /usr/bin/date +"%Z")
 
-TOTAL_SPACE_GB=$(echo "scale=2; $TOTAL_BYTES / (1024*1024*1024)" | bc)
-USED_SPACE_GB=$(echo "scale=2; $USED_BYTES / (1024*1024*1024)" | bc)
-AVAILABLE_SPACE_GB=$(echo "scale=2; $AVAILABLE_BYTES / (1024*1024*1024)" | bc)
+# 1. Disk Space (for /)
+DF_OUTPUT_ROOT=$(/usr/bin/df -B1 / | /usr/bin/awk 'NR==2 {print $2, $3, $4, $5}')
+TOTAL_BYTES=$(/usr/bin/echo "$DF_OUTPUT_ROOT" | /usr/bin/awk '{print $1}')
+USED_BYTES=$(/usr/bin/echo "$DF_OUTPUT_ROOT" | /usr/bin/awk '{print $2}')
+AVAILABLE_BYTES=$(/usr/bin/echo "$DF_OUTPUT_ROOT" | /usr/bin/awk '{print $3}')
+USAGE_PERCENTAGE=$(/usr/bin/echo "$DF_OUTPUT_ROOT" | /usr/bin/awk '{print $4}' | /usr/bin/sed 's/%//')
 
-# Memory Information (from /proc/meminfo)
-MEMTOTAL_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-MEMAVAILABLE_KB=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+TOTAL_SPACE_GB=$(/usr/bin/echo "scale=2; $TOTAL_BYTES / (1024*1024*1024)" | /usr/bin/bc)
+USED_SPACE_GB=$(/usr/bin/echo "scale=2; $USED_BYTES / (1024*1024*1024)" | /usr/bin/bc)
+AVAILABLE_SPACE_GB=$(/usr/bin/echo "scale=2; $AVAILABLE_BYTES / (1024*1024*1024)" | /usr/bin/bc)
 
-# CPU Information (from /proc/cpuinfo)
-NUM_PROCESSORS=$(grep -c ^processor /proc/cpuinfo)
-CPU_MHZ=$(grep "cpu MHz" /proc/cpuinfo | head -n 1 | awk '{print int($4)}')
 
-# System Uptime and Load Averages
-UPTIME_INFO=$(uptime)
+# 2. Memory Information (from /proc/meminfo) - Specific request: Total, Available, Used
+MEMTOTAL_KB=$(/usr/bin/grep MemTotal /proc/meminfo | /usr/bin/awk '{print $2}')
+MEMAVAILABLE_KB=$(/usr/bin/grep MemAvailable /proc/meminfo | /usr/bin/awk '{print $2}')
+MEMUSED_KB=$((MEMTOTAL_KB - MEMAVAILABLE_KB)) # Calculated used memory
+
+# Convert to MB for display
+MEMTOTAL_MB=$(/usr/bin/echo "scale=2; $MEMTOTAL_KB / 1024" | /usr/bin/bc)
+MEMAVAILABLE_MB=$(/usr/bin/echo "scale=2; $MEMAVAILABLE_KB / 1024" | /usr/bin/bc)
+MEMUSED_MB=$(/usr/bin/echo "scale=2; $MEMUSED_KB / 1024" | /usr/bin/bc)
+
+
+# 3. CPU Information (from /proc/cpuinfo)
+NUM_PROCESSORS=$(/usr/bin/grep -c ^processor /proc/cpuinfo | tr -d '\n\r ')
+CPU_MHZ=$(/usr/bin/grep "cpu MHz" /proc/cpuinfo | /usr/bin/head -n 1 | /usr/bin/awk '{print int($4)}' | tr -d '\n\r ')
+
+
+# 4. System Uptime and Load Averages
+UPTIME_INFO=$(/usr/bin/uptime)
+# Extract load averages from uptime info
+LOAD_1=$(/usr/bin/echo "$UPTIME_INFO" | /usr/bin/awk -F'load average: ' '{print $2}' | /usr/bin/awk '{print $1}' | /usr/bin/sed 's/,//' | tr -d '\n\r ')
+LOAD_5=$(/usr/bin/echo "$UPTIME_INFO" | /usr/bin/awk -F'load average: ' '{print $2}' | /usr/bin/awk '{print $2}' | /usr/bin/sed 's/,//' | tr -d '\n\r ')
+LOAD_15=$(/usr/bin/echo "$UPTIME_INFO" | /usr/bin/awk -F'load average: ' '{print $2}' | /usr/bin/awk '{print $3}' | tr -d '\n\r ')
+
+
+# 5. User Logins (Past 5 Days)
+USER_LOGIN_DATA="No user logins recorded in the past 5 days, or 'last' command output not available."
+
+if /usr/bin/command -v last &> /dev/null
+then
+    LOGIN_RAW=$(/usr/bin/last -F -s -5days | /usr/bin/grep -Ev "wtmp|reboot|shutdown|system boot" | /usr/bin/head -n 20) # Limit to 20 recent logins
+
+    if [ -n "$LOGIN_RAW" ]; then
+        USER_LOGIN_DATA="<table style=\"width:100%; border-collapse: collapse; table-layout: fixed;\">" # Added table-layout: fixed
+        USER_LOGIN_DATA+="<thead><tr style=\"background-color:#444;\">"
+        USER_LOGIN_DATA+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 15%;\">User</th>"
+        USER_LOGIN_DATA+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 25%;\">From (IP/TTY)</th>"
+        USER_LOGIN_DATA+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 30%;\">Login Time</th>"
+        USER_LOGIN_DATA+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 30%;\">Logout Time / Duration</th>"
+        USER_LOGIN_DATA+="</tr></thead><tbody>"
+
+        while IFS= read -r line; do
+            user=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $1}')
+            tty=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $2}')
+            # Logic to find the IP/Hostname
+            from=$(/usr/bin/echo "$line" | /usr/bin/awk '{
+                if ($3 ~ /\./ || $3 == ":0" || $3 == ":1") { print $3 }
+                else if ($4 ~ /\./ || $4 == ":0" || $4 == ":1") { print $4 }
+                else { print $3 } # Default to $3 if no clear IP
+            }')
+            display_from="${tty} (${from})"
+
+            login_time_full=$(/usr/bin/echo "$line" | /usr/bin/awk '{
+                for (i=5; i<=NF; i++) {
+                    if ($i ~ /^[0-9]{4}$/) { # Found year
+                        for (j=i-4; j<=i; j++) printf "%s ", $j;
+                        exit;
+                    }
+                }
+            }' | /usr/bin/xargs)
+
+            logout_info=$(/usr/bin/echo "$line" | /usr/bin/awk '{
+                logout_start_idx = 0;
+                for (i=5; i<=NF; i++) {
+                    if ($i ~ /^[0-9]{4}$/) { # Found year, next is logout info start
+                        logout_start_idx = i + 1;
+                        break;
+                    }
+                }
+                if (logout_start_idx > 0) {
+                    for (i=logout_start_idx; i<=NF; i++) printf "%s ", $i;
+                } else {
+                    print "N/A";
+                }
+            }' | /usr/bin/xargs)
+
+            # Escape HTML special characters
+            user=$(/usr/bin/echo "$user" | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            display_from=$(/usr/bin/echo "$display_from" | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            login_time_full=$(/usr/bin/echo "$login_time_full" | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            logout_info=$(/usr/bin/echo "$logout_info" | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+
+            USER_LOGIN_DATA+="<tr>"
+            USER_LOGIN_DATA+="<td style=\"padding: 8px; border: 1px solid #555;\">${user}</td>"
+            USER_LOGIN_DATA+="<td style=\"padding: 8px; border: 1px solid #555;\">${display_from}</td>"
+            USER_LOGIN_DATA+="<td style=\"padding: 8px; border: 1px solid #555;\">${login_time_full}</td>"
+            USER_LOGIN_DATA+="<td style=\"padding: 8px; border: 1px solid #555;\">${logout_info}</td>"
+            USER_LOGIN_DATA+="</tr>"
+        done <<< "$LOGIN_RAW"
+        USER_LOGIN_DATA+="</tbody></table>"
+    fi
+else
+    USER_LOGIN_DATA="<p>The 'last' command is not available to retrieve user login data.</p>"
+fi
+
+
+# 6. Active Disk Information - Mounted Filesystems (including swap)
+ACTIVE_DISK_INFO_HTML="<p>No active disk information found or suitable devices.</p>"
+
+DF_ALL_OUTPUT=$(/usr/bin/df -hT --output=source,used,pcent,fstype,target 2>/dev/null | /usr/bin/tail -n +2)
+
+if [ -n "$DF_ALL_OUTPUT" ]; then
+    ACTIVE_DISK_INFO_HTML="<table style=\"width:100%; border-collapse: collapse; table-layout: fixed;\">" # Added table-layout: fixed
+    ACTIVE_DISK_INFO_HTML+="<thead><tr style=\"background-color:#444;\">"
+    ACTIVE_DISK_INFO_HTML+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 40%;\">Device (Mount Point)</th>"
+    ACTIVE_DISK_INFO_HTML+="<th style=\"padding: 8px; border: 1px solid #555; text-align: right; width: 30%;\">Used Space</th>"
+    ACTIVE_DISK_INFO_HTML+="<th style=\"padding: 8px; border: 1px solid #555; text-align: right; width: 30%;\">Usage %</th>"
+    ACTIVE_DISK_INFO_HTML+="</tr></thead><tbody>"
+
+    /usr/bin/echo "$DF_ALL_OUTPUT" | while IFS= read -r line; do
+        DEVICE=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $1}')
+        USED=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $3}')
+        PERCENT=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $4}')
+        FSTYPE=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $2}')
+        MOUNT_POINT=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $5}')
+
+        if [[ "$FSTYPE" != "tmpfs" && \
+              "$FSTYPE" != "devtmpfs" && \
+              "$FSTYPE" != "squashfs" && \
+              "$FSTYPE" != "cgroup" && \
+              "$FSTYPE" != "overlay" && \
+              "$FSTYPE" != "fuse.portal" && \
+              "$FSTYPE" != "efivarfs" && \
+              "$DEVICE" != "udev" && \
+              "$DEVICE" != "tmpfs" && \
+              "$DEVICE" != "cgroup" && \
+              "$MOUNT_POINT" != "/snap"* && \
+              "$MOUNT_POINT" != "/var/lib/snapd/snap"* && \
+              "$MOUNT_POINT" != "/run/user"* ]]; then
+            ACTIVE_DISK_INFO_HTML+="<tr>"
+            ACTIVE_DISK_INFO_HTML+="<td style=\"padding: 8px; border: 1px solid #555;\">${DEVICE} (${MOUNT_POINT})</td>"
+            ACTIVE_DISK_INFO_HTML+="<td style=\"padding: 8px; border: 1px solid #555; text-align: right;\">${USED}</td>"
+            ACTIVE_DISK_INFO_HTML+="<td style=\"padding: 8px; border: 1px solid #555; text-align: right;\">${PERCENT}</td>"
+            ACTIVE_DISK_INFO_HTML+="</tr>"
+        fi
+    done
+
+    # Add swap information
+    # Note: swapon might be in /sbin or /usr/sbin. Adjust path if necessary.
+    SWAP_INFO=$(/usr/sbin/swapon -s) # Common path for swapon on Ubuntu
+    if [ -n "$SWAP_INFO" ]; then
+        /usr/bin/echo "$SWAP_INFO" | /usr/bin/tail -n +2 | while IFS= read -r line; do
+            SWAP_DEVICE=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $1}')
+            SWAP_USED_KB=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $3}')
+            SWAP_TOTAL_KB=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $2}')
+
+            if [ "$SWAP_TOTAL_KB" -gt 0 ]; then
+                SWAP_PERCENT=$(/usr/bin/echo "scale=0; ($SWAP_USED_KB * 100) / $SWAP_TOTAL_KB" | /usr/bin/bc)
+            else
+                SWAP_PERCENT="0"
+            fi
+
+            ACTIVE_DISK_INFO_HTML+="<tr>"
+            ACTIVE_DISK_INFO_HTML+="<td style=\"padding: 8px; border: 1px solid #555;\">${SWAP_DEVICE} (swap)</td>"
+            ACTIVE_DISK_INFO_HTML+="<td style=\"padding: 8px; border: 1px solid #555; text-align: right;\">${SWAP_USED_KB}K</td>"
+            ACTIVE_DISK_INFO_HTML+="<td style=\"padding: 8px; border: 1px solid #555; text-align: right;\">${SWAP_PERCENT}%</td>"
+            ACTIVE_DISK_INFO_HTML+="</tr>"
+        done
+    fi
+
+    ACTIVE_DISK_INFO_HTML+="</tbody></table>"
+fi
+
+
+# 7. Recent Apache Access Log Entries
+LAST_ACCESS_LOGS=$(/usr/bin/tail -n 10 /var/log/apache2/access.log 2>/dev/null | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+
+if [ -z "$LAST_ACCESS_LOGS" ]; then
+    LAST_ACCESS_LOGS="<p>No recent Apache access log entries found or log file is inaccessible.</p>"
+fi
+
 
 # Username of script runner (will be 'root' if run by cron as root)
-RUN_BY_USER=$(whoami)
+RUN_BY_USER=$(/usr/bin/whoami)
+
 
 # --- Generate HTML Output ---
-cat <<EOF > "$OUTPUT_FILE"
+
+# Create the output directory if it doesn't exist
+mkdir -p "$(dirname "$OUTPUT_FILE")"
+
+# IMPORTANT: The 'EOF' is NOT quoted to allow bash to interpret '$' inside the HTML/JS block.
+# IMPORTANT: Backticks (`) and dollar signs ($) that are part of JavaScript template literal syntax
+# must be escaped (e.g., \` and \${) to prevent bash from interpreting them.
+/usr/bin/cat <<EOF > "$OUTPUT_FILE"
 <!DOCTYPE html>
 <html>
 <head>
     <title>Server Status Report</title>
-    <meta http-equiv="refresh" content="60"> <style>
+    <meta http-equiv="refresh" content="60">
+    <script src="[https://cdn.jsdelivr.net/npm/chart.js](https://cdn.jsdelivr.net/npm/chart.js)"></script>
+    <style>
         body {
             font-family: monospace;
             background-color: #222;
@@ -137,6 +363,20 @@ cat <<EOF > "$OUTPUT_FILE"
             white-space: pre-wrap;
             word-wrap: break-word;
         }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            padding: 8px;
+            border: 1px solid #555;
+            text-align: left;
+        }
+        th {
+            background-color: #444;
+            color: #0f0;
+        }
         hr {
             border: 0;
             height: 1px;
@@ -149,6 +389,41 @@ cat <<EOF > "$OUTPUT_FILE"
             color: #0f0;
             margin-bottom: 10px;
         }
+
+    /* CPU Load Visualizer Styles */
+    .cpu-visualizer-container {
+        display: flex;
+        justify-content: center; /* Center the cores horizontally */
+        align-items: flex-end; /* Align cores to the bottom */
+        gap: 5px; /* Space between core bars */
+        height: 100px; /* Fixed height for the visualization */
+        margin-top: 15px;
+        margin-bottom: 25px;
+    }
+
+    .cpu-core-bar {
+        width: 20px; /* Width of each core bar */
+        height: 100%; /* Take full height of container */
+        background-color: #333; /* Background color of empty part of the core */
+        border: 1px solid #555;
+        position: relative;
+        overflow: hidden; /* Hide overflow of fill */
+        border-radius: 3px; /* Slightly rounded corners */
+    }
+
+    .cpu-core-fill {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        transition: height 0.5s ease-out, background-color 0.5s ease-out; /* Smooth transition for fill */
+        border-radius: 2px; /* Slightly rounded corners */
+    }
+
+    /* Color ranges for CPU fill */
+    .cpu-fill-low { background-color: #0f0; } /* Green */
+    .cpu-fill-medium { background-color: #ff0; } /* Yellow */
+    .cpu-fill-high { background-color: #f00; } /* Red */
         .usage-percentage {
             color: #ff0;
         }
@@ -158,6 +433,13 @@ cat <<EOF > "$OUTPUT_FILE"
             text-align: center;
             color: #aaa;
         }
+        #live-clock { /* Style for the live clock */
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #0ff; /* Cyan color */
+            display: inline-block; /* Allows text around it to flow */
+            min-width: 90px; /* Prevent jumping if time changes width */
+        }
     </style>
 </head>
 <body>
@@ -165,21 +447,53 @@ cat <<EOF > "$OUTPUT_FILE"
     <h1>Server Status - Generated Report</h1>
     <hr>
 
-    <p class="section-title">Disk Space Information (Root Filesystem)</p>
+    <p class="section-title">Memory Information</p>
     <pre>
+Total Memory        : ${MEMTOTAL_MB} MB
+Available Memory    : ${MEMAVAILABLE_MB} MB
+Used Memory         : ${MEMUSED_MB} MB
+    </pre>
+    <hr>
+
+    <p class="section-title">Disk Space Information (Root Filesystem)</p>
+    <div style="display: flex; flex-wrap: wrap; justify-content: space-around; align-items: center; margin-bottom: 20px">
+        <div style="flex: 1; min-width: 300px; max-width: 400px; padding: 10px; box-sizing: border-box;">
+            <canvas id="diskSpaceChart"
+                    data-total="${TOTAL_SPACE_GB}"
+                    data-used="${USED_SPACE_GB}"
+                    data-available="${AVAILABLE_SPACE_GB}">
+            </canvas>
+        </div>
+        <div style="flex: 1; min-width: 300px; padding: 10px; box-sizing: border-box;">
+            <pre style="white-space: pre-wrap; word-wrap: break-word;">
       Used Space       : ${USED_BYTES} bytes (${USED_SPACE_GB} GB)
       Available Space  : ${AVAILABLE_BYTES} bytes (${AVAILABLE_SPACE_GB} GB)
       <span class="usage-percentage">Usage Percentage : ${USAGE_PERCENTAGE}%</span>
       Total disk space : ${TOTAL_BYTES} bytes (${TOTAL_SPACE_GB} GB)
-    </pre>
+            </pre>
+        </div>
+    </div>
     <hr>
 
-    <p class="section-title">Memory Information</p>
+    <p class="section-title">Active Disk Information (Mounted Filesystems and Swap)</p>
+    ${ACTIVE_DISK_INFO_HTML}
+    <hr>
+
+    <p class="section-title">User Logins (Past 5 Days)</p>
+    ${USER_LOGIN_DATA}
+    <hr>
+
+    <p class="section-title">CPU Information</p>
+    <div class="cpu-visualizer-container"
+          data-processors="${NUM_PROCESSORS}"
+          data-load1="${LOAD_1}"
+          data-load5="${LOAD_5}"
+          data-load15="${LOAD_15}">
+        </div>
     <pre>
 The system has ${NUM_PROCESSORS} Processors
 The average CPU speed is ${CPU_MHZ} MHz
-The system has ${MEMTOTAL_KB} kB of total memory
-The system has ${MEMAVAILABLE_KB} kB of available memory
+Load Average (1m, 5m, 15m): ${LOAD_1}, ${LOAD_5}, ${LOAD_15}
     </pre>
     <hr>
 
@@ -189,40 +503,222 @@ ${UPTIME_INFO}
     </pre>
     <hr>
 
-    <p>Run by: ${RUN_BY_USER}</p>
+    <p class="section-title">Recent Apache Access Logs (Last 10 Entries)</p>
+    <pre>
+    ${LAST_ACCESS_LOGS}
+    </pre>
+    <hr>
+
+    <p>Script last run by: ${RUN_BY_USER}</p>
     <hr>
 
     <footer>
-        <p>Page assembled ${CURRENT_DATE} - ${CURRENT_TIME} ${SERVER_TIMEZONE_SHORT}</p>
+        <p>Page generated on server: ${CURRENT_DATE} - ${CURRENT_TIME} ${SERVER_TIMEZONE_SHORT}</p>
+        <p>Current time (your browser): <span id="live-clock"></span></p>
     </footer>
+
+    <script>
+    // Disk Space Pie Chart
+    document.addEventListener('DOMContentLoaded', function() {
+        var ctx = document.getElementById('diskSpaceChart').getContext('2d');
+        var canvasElement = document.getElementById('diskSpaceChart');
+
+        // Retrieve data from data attributes
+        var totalSpace = parseFloat(canvasElement.dataset.total);
+        var usedSpace = parseFloat(canvasElement.dataset.used);
+        var availableSpace = parseFloat(canvasElement.dataset.available);
+
+        var diskSpaceChart = new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: ['Used Space', 'Available Space'],
+                datasets: [{
+                    data: [usedSpace, availableSpace],
+                    backgroundColor: [
+                        'rgba(255, 99, 132, 0.8)', // Red for Used
+                        'rgba(75, 192, 192, 0.8)' // Green for Available
+                    ],
+                    borderColor: [
+                        'rgba(255, 99, 132, 1)',
+                        'rgba(75, 192, 192, 1)'
+                    ],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom', // Position legend below the chart
+                        labels: {
+                            color: '#eee' // Adjust legend label color for dark theme
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: 'Root Filesystem Usage',
+                        color: '#0f0' // Title color for dark theme
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.parsed !== null) {
+                                    label += context.parsed.toFixed(2) + ' GB';
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    });
+</script>
+<script>
+    // CPU Core Load Visualizer
+    document.addEventListener('DOMContentLoaded', function() {
+        var container = document.querySelector('.cpu-visualizer-container');
+        var numProcessors = parseInt(container.dataset.processors);
+        var load1 = parseFloat(container.dataset.load1);
+        // var load5 = parseFloat(container.dataset.load5); // Not directly used in this specific visualization but available
+        // var load15 = parseFloat(container.dataset.load15); // Not directly used in this specific visualization but available
+
+        // --- DEBUGGING LINES (can be removed once confirmed working) ---
+        console.log("CPU Visualizer Debug Info:");
+        console.log("  numProcessors from data:", container.dataset.processors, "Parsed as:", numProcessors, "Type:", typeof numProcessors);
+        console.log("  load1 from data:", container.dataset.load1, "Parsed as:", load1, "Type:", typeof load1);
+        if (isNaN(numProcessors) || isNaN(load1)) {
+            console.error("  ERROR: CPU Visualizer received invalid numeric data (NaN found). Check Bash script output and HTML data attributes.");
+        }
+        // --- END DEBUGGING LINES ---
+
+        // Use the 1-minute load average for the primary visualizer
+        var currentLoad = load1;
+
+        // Generate CPU core bars
+        for (let i = 0; i < numProcessors; i++) {
+            var coreBar = document.createElement('div');
+            coreBar.className = 'cpu-core-bar';
+
+            var coreFill = document.createElement('div');
+            coreFill.className = 'cpu-core-fill';
+
+            let fillPercentage;
+            let loadForThisCore = currentLoad - i; // How much load is left for this specific core
+
+            if (loadForThisCore <= 0) {
+                fillPercentage = 0; // This core is not loaded
+            } else if (loadForThisCore >= 1) {
+                fillPercentage = 100; // This core is fully loaded
+            } else {
+                fillPercentage = loadForThisCore * 100; // This core is partially loaded
+            }
+
+            coreFill.style.height = fillPercentage + '%';
+
+            // Determine color based on load for this specific core or overall for simplicity
+            if (fillPercentage > 80) {
+                coreFill.classList.add('cpu-fill-high');
+            } else if (fillPercentage > 40) {
+                coreFill.classList.add('cpu-fill-medium');
+            } else {
+                coreFill.classList.add('cpu-fill-low');
+            }
+
+            coreBar.appendChild(coreFill);
+            container.appendChild(coreBar);
+        }
+
+        // Optional: Add an "overflow" indicator if load exceeds cores
+        if (currentLoad > numProcessors) {
+            var overflowIndicator = document.createElement('div');
+            overflowIndicator.style.cssText = \`
+                width: 30px;
+                height: 20px;
+                background-color: #f00;
+                color: white;
+                text-align: center;
+                line-height: 20px;
+                font-size: 0.8em;
+                font-weight: bold;
+                border-radius: 3px;
+                margin-left: 10px;
+            \`;
+            overflowIndicator.textContent = \`+\${(currentLoad - numProcessors).toFixed(1)}\`;
+            container.appendChild(overflowIndicator);
+        }
+    });
+</script>
+
+    <script>
+        // JavaScript to update a live clock in the browser
+        function updateClock() {
+            var now = new Date();
+            var hours = String(now.getHours()).padStart(2, '0');
+            var minutes = String(now.getMinutes()).padStart(2, '0');
+            var seconds = String(now.getSeconds()).padStart(2, '0');
+            var timeString = hours + ':' + minutes + ':' + seconds;
+
+            var timezoneAbbr = '';
+            try {
+                var timezoneName = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                const commonAbbr = {
+                    "America/New_York": "EDT", "America/Detroit": "EDT", "America/Chicago": "CDT",
+                    "America/Los_Angeles": "PDT", "Europe/London": "BST", "Europe/Berlin": "CEST"
+                };
+                if (commonAbbr[timezoneName]) {
+                    timezoneAbbr = commonAbbr[timezoneName];
+                } else {
+                     // Fallback to a simpler extraction or just the full name if not in commonAbbr
+                     var parts = timezoneName.split('/');
+                     if (parts.length > 1) {
+                         timezoneAbbr = parts[parts.length - 1].replace(/_/g, ' ');
+                     } else {
+                         timezoneAbbr = timezoneName;
+                     }
+                }
+            } catch (e) {
+                console.error("Could not get client timezone:", e);
+            }
+
+            document.getElementById('live-clock').textContent = timeString + (timezoneAbbr ? ' ' + timezoneAbbr : '');
+        }
+
+        setInterval(updateClock, 1000);
+        updateClock();
+    </script>
 
 </body>
 </html>
 EOF
 
 # Set proper permissions for the generated HTML file
-chmod 644 "$OUTPUT_FILE"
-chown www-data:www-data "$OUTPUT_FILE"
+/usr/bin/chmod 644 "$OUTPUT_FILE"
+# Set ownership to the Apache user (www-data on Ubuntu)
+/usr/bin/chown www-data:www-data "$OUTPUT_FILE"
 
-echo "Generated '$OUTPUT_FILE' successfully."
+/usr/bin/echo "Generated '$OUTPUT_FILE' successfully."
 Save and exit the nano editor (Ctrl+X, then Y, then Enter).
 
 Make the script executable:
 
 Bash
 
-chmod +x ~/scripts/generate_index.sh
+chmod +x ~/my-system-status-dashboard/scripts/generate_index.sh
 Step 3.3: Configure Apache Directory Index
-Ensure Apache is configured to look for index.html as the
- default page when a directory is requested.
+Ensure Apache is configured to look for index.html as the default page when a directory is requested.
 
 Edit the dir.conf file:
 
 Bash
 
 sudo nano /etc/apache2/mods-enabled/dir.conf
-Locate the DirectoryIndex line and ensure index.html 
-is listed, preferably first if it's the primary page you want served by default:
+Locate the DirectoryIndex line and ensure index.html is listed, preferably first if it's the primary page you want served by default:
 
 Apache
 
@@ -237,8 +733,7 @@ Bash
 
 sudo systemctl restart apache2
 Step 3.4: Automate Script Execution with Cron
-To make the dashboard "real-time," you need to run
- the generate_index.sh script periodically using cron.
+To keep the dashboard updated periodically, you need to run the generate_index.sh script using cron. Since the script writes to /var/www/html/, it requires permissions to do so. The safest way is often to run it as the root user or a user with sudo privileges configured to write to that directory.
 
 Open the root user's crontab for editing:
 
@@ -248,31 +743,30 @@ sudo crontab -e
 (If prompted, select nano as your editor).
 
 Add the following line at the end of the file. This will run the script every minute.
-IMPORTANT: Replace your_username with your actual Linux username.
 
-Code snippet
+Bash
 
-* * * * * /home/your_username/scripts/generate_index.sh >> 
-/var/log/sys_status_gen.log 2>&1
+* * * * * /home/meraki/my-system-status-dashboard/scripts/generate_index.sh >> /var/log/sys_status_gen.log 2>&1
 * * * * *: This is the cron schedule for "every minute."
 
->> /var/log/sys_status_gen.log 2>&1: This part redirects
- all output (standard output and errors) from the script
- to a log file. This is crucial for troubleshooting if the page isn't updating.
+>> /var/log/sys_status_gen.log 2>&1: This part redirects all output (standard output and errors) from the script to a log file. This is crucial for troubleshooting if the page isn't updating or errors occur.
 
 If you prefer a different interval (e.g., every 5 minutes):
 
-Code snippet
+Bash
 
-*/5 * * * * /home/your_username/scripts/generate_index.sh >> 
-/var/log/sys_status_gen.log 2>&1
+*/5 * * * * /home/meraki/my-system-status-dashboard/scripts/generate_index.sh >> /var/log/sys_status_gen.log 2>&1
 Save and exit (Ctrl+X, Y, Enter). You should see crontab: installing new crontab.
 
 Step 3.5: Configure Firewall (UFW)
-If you are using UFW (Uncomplicated Firewall), ensure 
-port 8080 is open to allow incoming web traffic to Apache.
+If you are using UFW (Uncomplicated Firewall), ensure port 80 (and 8080 if you've changed Apache's listening port) is open to allow incoming web traffic to Apache.
 
-Allow traffic on port 8080:
+Allow traffic on port 80:
+
+Bash
+
+sudo ufw allow 80/tcp
+If you are specifically using port 8080:
 
 Bash
 
@@ -282,24 +776,57 @@ Check UFW status:
 Bash
 
 sudo ufw status
-You should see 8080/tcp ALLOW Anywhere (or similar) in the output.
+You should see 80/tcp ALLOW Anywhere (or 8080/tcp ALLOW Anywhere) in the output.
 
 4. Accessing the Dashboard
-After completing all the setup steps, wait for at least one minute
- (for the cron job to run the first time).
+After completing all the setup steps, wait for at least one minute (for the cron job to run the first time and generate the index.html).
 
 Then, open your web browser and navigate to:
 
 If you are on the server itself:
 
-http://localhost:8080
-From another computer on your network or the internet:
-Replace YOUR_SERVER_IP_ADDRESS with your Ubuntu server's actual IP address.
+http://localhost/
+(Or http://localhost:8080/ if you configured Apache to listen on port 8080).
 
-http://YOUR_SERVER_IP_ADDRESS:8080
-(You can find your server's IP address by running ip a or hostname -I 
-in your server's terminal.)
+From another computer on your network or the internet: Replace YOUR_SERVER_IP_ADDRESS with your Ubuntu server's actual IP address.
 
-You should now see your custom-designed system status page with updated information. 
-The page will automatically refresh every 60 seconds in your browser.
+http://YOUR_SERVER_IP_ADDRESS/
+(Or http://YOUR_SERVER_IP_ADDRESS:8080/ if using port 8080).
 
+You can find your server's IP address by running ip a or hostname -I in your server's terminal.
+
+You should now see your custom-designed system status page with updated information. The page will automatically refresh every 60 seconds in your browser.
+
+5. Troubleshooting
+Dashboard not updating or showing old data:
+
+Check OUTPUT_FILE path: Ensure OUTPUT_FILE in generate_index.sh (/var/www/html/index.html) is the exact path Apache is serving.
+
+Cron job execution: Check the cron log file (/var/log/sys_status_gen.log) for any errors from the generate_index.sh script. Ensure the cron job is running (check sudo grep CRON /var/log/syslog).
+
+Permissions: The user running the cron job (e.g., root) must have write permissions to /var/www/html/. The chown www-data:www-data command in the script ensures Apache can read the file.
+
+"NaN found" or JavaScript syntax errors in browser console:
+
+This indicates that numbers or strings passed from Bash to HTML data attributes (e.g., data-processors, data-load1) are not correctly formatted.
+
+Verify generate_index.sh content: Ensure that the cat <<EOF line has EOF unquoted. Also, crucially, check that all backticks (`) and dollar signs ($) within JavaScript template literals (e.g., in overflowIndicator.style.cssText and overflowIndicator.textContent) are properly escaped with a backslash (\``, ${`).
+
+Inspect the generated /var/www/html/index.html file manually to see what actual values are being outputted in the data- attributes and JavaScript strings.
+
+Dashboard not loading at all:
+
+Apache status: Check if Apache is running (sudo systemctl status apache2).
+
+Firewall: Ensure the Apache port (80 or 8080) is open in your firewall (sudo ufw status).
+
+6. Customization
+Update Interval: Change meta http-equiv="refresh" content="60" in index.html for browser refresh, and adjust the cron schedule (crontab -e) for script execution frequency.
+
+Timezone: Modify SERVER_TIMEZONE in generate_index.sh.
+
+Monitored Metrics: Add or remove commands in generate_index.sh to collect different system information.
+
+Styling: Adjust the CSS within the <style> tags in index.html to change the dashboard's appearance.
+
+Additional Visualizations: Integrate other Chart.js charts or JavaScript visualizations by adding relevant data attributes to your HTML and writing corresponding JavaScript code.
