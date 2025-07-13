@@ -349,6 +349,7 @@ ${UPTIME_INFO}
     <hr>
 
     <p>Script last run by: ${RUN_BY_USER}</p>
+    <p>Contact: <a href="mailto:lboudeguig@hawkmail.hfcc.edu" style="color: #0ff; text-decoration: none;">Lakhdar (lboudeguig@hawkmail.hfcc.edu)</a></p>
     <hr>
 
     <footer>
