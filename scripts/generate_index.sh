@@ -3,7 +3,7 @@
 # Configuration
 # Path where the HTML file will be generated.
 # Ensure this directory exists or will be created by the script.
-OUTPUT_FILE="/var/www/html/index.html" # Assuming this is the correct target path
+OUTPUT_FILE="/var/www/html/index.html" # Assuming this is the correct target path for Apache
 SERVER_TIMEZONE="America/Detroit" # Set your server's timezone for date output
 
 # --- Collect System Information ---
@@ -15,7 +15,7 @@ CURRENT_TIME=$(TZ="$SERVER_TIMEZONE" /usr/bin/date +"%H:%M:%S")
 # Determine a short timezone abbreviation for display
 SERVER_TIMEZONE_SHORT=$(TZ="$SERVER_TIMEZONE" /usr/bin/date +"%Z")
 
-# 1. Disk Space (for /) - Retaining previous full detail
+# 1. Disk Space (for /)
 DF_OUTPUT_ROOT=$(/usr/bin/df -B1 / | /usr/bin/awk 'NR==2 {print $2, $3, $4, $5}')
 TOTAL_BYTES=$(/usr/bin/echo "$DF_OUTPUT_ROOT" | /usr/bin/awk '{print $1}')
 USED_BYTES=$(/usr/bin/echo "$DF_OUTPUT_ROOT" | /usr/bin/awk '{print $2}')
@@ -39,7 +39,6 @@ MEMUSED_MB=$(/usr/bin/echo "scale=2; $MEMUSED_KB / 1024" | /usr/bin/bc)
 
 
 # 3. CPU Information (from /proc/cpuinfo)
-# *** ADDED tr -d '\n\r ' for clean output ***
 NUM_PROCESSORS=$(/usr/bin/grep -c ^processor /proc/cpuinfo | tr -d '\n\r ')
 CPU_MHZ=$(/usr/bin/grep "cpu MHz" /proc/cpuinfo | /usr/bin/head -n 1 | /usr/bin/awk '{print int($4)}' | tr -d '\n\r ')
 
@@ -47,7 +46,6 @@ CPU_MHZ=$(/usr/bin/grep "cpu MHz" /proc/cpuinfo | /usr/bin/head -n 1 | /usr/bin/
 # 4. System Uptime and Load Averages
 UPTIME_INFO=$(/usr/bin/uptime)
 # Extract load averages from uptime info
-# *** ADDED tr -d '\n\r ' for clean output ***
 LOAD_1=$(/usr/bin/echo "$UPTIME_INFO" | /usr/bin/awk -F'load average: ' '{print $2}' | /usr/bin/awk '{print $1}' | /usr/bin/sed 's/,//' | tr -d '\n\r ')
 LOAD_5=$(/usr/bin/echo "$UPTIME_INFO" | /usr/bin/awk -F'load average: ' '{print $2}' | /usr/bin/awk '{print $2}' | /usr/bin/sed 's/,//' | tr -d '\n\r ')
 LOAD_15=$(/usr/bin/echo "$UPTIME_INFO" | /usr/bin/awk -F'load average: ' '{print $2}' | /usr/bin/awk '{print $3}' | tr -d '\n\r ')
@@ -209,7 +207,9 @@ RUN_BY_USER=$(/usr/bin/whoami)
 # Create the output directory if it doesn't exist
 mkdir -p "$(dirname "$OUTPUT_FILE")"
 
-# IMPORTANT: The 'EOF' is quoted to prevent bash from interpreting '$' inside the HTML/JS block.
+# IMPORTANT: The 'EOF' is NOT quoted to allow bash to interpret '$' inside the HTML/JS block.
+# IMPORTANT: Backticks (`) and dollar signs ($) that are part of JavaScript template literal syntax
+# must be escaped (e.g., \` and \${) to prevent bash from interpreting them.
 /usr/bin/cat <<EOF > "$OUTPUT_FILE"
 <!DOCTYPE html>
 <html>
@@ -217,6 +217,7 @@ mkdir -p "$(dirname "$OUTPUT_FILE")"
     <title>Server Status Report</title>
     <meta http-equiv="refresh" content="60">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.2.1"></script>
     <style>
         body {
             font-family: monospace;
@@ -258,41 +259,6 @@ mkdir -p "$(dirname "$OUTPUT_FILE")"
             color: #0f0;
             margin-bottom: 10px;
         }
-
-    /* CPU Load Visualizer Styles */
-    .cpu-visualizer-container {
-        display: flex;
-        justify-content: center; /* Center the cores horizontally */
-        align-items: flex-end; /* Align cores to the bottom */
-        gap: 5px; /* Space between core bars */
-        height: 100px; /* Fixed height for the visualization */
-        margin-top: 15px;
-        margin-bottom: 25px;
-    }
-
-    .cpu-core-bar {
-        width: 20px; /* Width of each core bar */
-        height: 100%; /* Take full height of container */
-        background-color: #333; /* Background color of empty part of the core */
-        border: 1px solid #555;
-        position: relative;
-        overflow: hidden; /* Hide overflow of fill */
-        border-radius: 3px; /* Slightly rounded corners */
-    }
-
-    .cpu-core-fill {
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        transition: height 0.5s ease-out, background-color 0.5s ease-out; /* Smooth transition for fill */
-        border-radius: 2px; /* Slightly rounded corners */
-    }
-
-    /* Color ranges for CPU fill */
-    .cpu-fill-low { background-color: #0f0; } /* Green */
-    .cpu-fill-medium { background-color: #ff0; } /* Yellow */
-    .cpu-fill-high { background-color: #f00; } /* Red */
         .usage-percentage {
             color: #ff0;
         }
@@ -353,17 +319,21 @@ Used Memory         : ${MEMUSED_MB} MB
     <hr>
 
     <p class="section-title">CPU Information</p>
-    <div class="cpu-visualizer-container"
-          data-processors="${NUM_PROCESSORS}"
-          data-load1="${LOAD_1}"
-          data-load5="${LOAD_5}"
-          data-load15="${LOAD_15}">
-        </div>
     <pre>
 The system has ${NUM_PROCESSORS} Processors
 The average CPU speed is ${CPU_MHZ} MHz
 Load Average (1m, 5m, 15m): ${LOAD_1}, ${LOAD_5}, ${LOAD_15}
     </pre>
+    <div style="display: flex; justify-content: center; margin-bottom: 20px;">
+        <div style="width: 80%; max-width: 600px;">
+            <canvas id="loadAverageChart"
+                    data-load1="${LOAD_1}"
+                    data-load5="${LOAD_5}"
+                    data-load15="${LOAD_15}"
+                    data-processors="${NUM_PROCESSORS}">
+            </canvas>
+        </div>
+    </div>
     <hr>
 
     <p class="section-title">System Uptime and Load Average</p>
@@ -448,119 +418,144 @@ ${UPTIME_INFO}
         });
     });
 </script>
+
 <script>
-    // CPU Core Load Visualizer
+    // CPU Load Average Chart
     document.addEventListener('DOMContentLoaded', function() {
-        var container = document.querySelector('.cpu-visualizer-container');
-        var numProcessors = parseInt(container.dataset.processors);
-        var load1 = parseFloat(container.dataset.load1);
-        // var load5 = parseFloat(container.dataset.load5); // Not directly used in this specific visualization but available
-        // var load15 = parseFloat(container.dataset.load15); // Not directly used in this specific visualization but available
+        var ctx = document.getElementById('loadAverageChart').getContext('2d');
+        var canvasElement = document.getElementById('loadAverageChart');
 
-        // --- ADDED DEBUGGING LINES ---
-        console.log("CPU Visualizer Debug Info:");
-        console.log("  numProcessors from data:", container.dataset.processors, "Parsed as:", numProcessors, "Type:", typeof numProcessors);
-        console.log("  load1 from data:", container.dataset.load1, "Parsed as:", load1, "Type:", typeof load1);
-        if (isNaN(numProcessors) || isNaN(load1)) {
-            console.error("  ERROR: CPU Visualizer received invalid numeric data (NaN found). Check Bash script output and HTML data attributes.");
-        }
-        // --- END DEBUGGING LINES ---
+        var load1 = parseFloat(canvasElement.dataset.load1);
+        var load5 = parseFloat(canvasElement.dataset.load5);
+        var load15 = parseFloat(canvasElement.dataset.load15);
+        var numProcessors = parseInt(canvasElement.dataset.processors);
 
-        // Use the 1-minute load average for the primary visualizer
-        var currentLoad = load1;
+        // Define a suggestedMax to ensure the scale goes slightly above max load
+        var suggestedMax = Math.max(load1, load5, load15, numProcessors * 1.2); // At least 20% above max cores or actual load
 
-        // Generate CPU core bars
-        for (let i = 0; i < numProcessors; i++) {
-            var coreBar = document.createElement('div');
-            coreBar.className = 'cpu-core-bar';
-
-            var coreFill = document.createElement('div');
-            coreFill.className = 'cpu-core-fill';
-
-            let fillPercentage;
-            let loadForThisCore = currentLoad - i; // How much load is left for this specific core
-
-            if (loadForThisCore <= 0) {
-                fillPercentage = 0; // This core is not loaded
-            } else if (loadForThisCore >= 1) {
-                fillPercentage = 100; // This core is fully loaded
-            } else {
-                fillPercentage = loadForThisCore * 100; // This core is partially loaded
+        var loadAverageChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['1 Min Load', '5 Min Load', '15 Min Load'],
+                datasets: [{
+                    label: 'Load Average',
+                    data: [load1, load5, load15],
+                    backgroundColor: [
+                        'rgba(75, 192, 192, 0.8)', // Greenish for 1 min
+                        'rgba(255, 206, 86, 0.8)',  // Yellowish for 5 min
+                        'rgba(255, 99, 132, 0.8)'   // Reddish for 15 min
+                    ],
+                    borderColor: [
+                        'rgba(75, 192, 192, 1)',
+                        'rgba(255, 206, 86, 1)',
+                        'rgba(255, 99, 132, 1)'
+                    ],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Load (relative to cores)',
+                            color: '#eee'
+                        },
+                        ticks: {
+                            color: '#eee' // Y-axis tick color
+                        },
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.1)' // Grid lines color
+                        },
+                        suggestedMax: suggestedMax // Set a dynamic max for the Y-axis
+                    },
+                    x: {
+                        ticks: {
+                            color: '#eee' // X-axis tick color
+                        },
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.1)' // Grid lines color
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false // Hide legend as there's only one dataset
+                    },
+                    title: {
+                        display: true,
+                        text: 'CPU Load Averages',
+                        color: '#0f0' // Title color
+                    },
+                    // Annotation plugin for the cores line
+                    annotation: {
+                        annotations: {
+                            line1: {
+                                type: 'line',
+                                yMin: numProcessors,
+                                yMax: numProcessors,
+                                borderColor: 'rgb(255, 255, 0)', // Yellow line
+                                borderWidth: 2,
+                                borderDash: [5, 5], // Dashed line
+                                label: {
+                                    display: true,
+                                    content: 'Total Cores (' + numProcessors + ')',
+                                    position: 'end',
+                                    color: 'rgb(255, 255, 0)',
+                                    backgroundColor: 'rgba(0,0,0,0.5)',
+                                    font: {
+                                        size: 10
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-
-            coreFill.style.height = fillPercentage + '%';
-
-            // Determine color based on load for this specific core or overall for simplicity
-            if (fillPercentage > 80) {
-                coreFill.classList.add('cpu-fill-high');
-            } else if (fillPercentage > 40) {
-                coreFill.classList.add('cpu-fill-medium');
-            } else {
-                coreFill.classList.add('cpu-fill-low');
-            }
-
-            coreBar.appendChild(coreFill);
-            container.appendChild(coreBar);
-        }
-
-        // Optional: Add an "overflow" indicator if load exceeds cores
-        if (currentLoad > numProcessors) {
-            var overflowIndicator = document.createElement('div');
-            overflowIndicator.style.cssText = `
-                width: 30px;
-                height: 20px;
-                background-color: #f00;
-                color: white;
-                text-align: center;
-                line-height: 20px;
-                font-size: 0.8em;
-                font-weight: bold;
-                border-radius: 3px;
-                margin-left: 10px;
-            `;
-            overflowIndicator.textContent = `${(currentLoad - numProcessors).toFixed(1)}`;
-            container.appendChild(overflowIndicator);
-        }
+        });
     });
 </script>
 
-    <script>
-        // JavaScript to update a live clock in the browser
-        function updateClock() {
-            var now = new Date();
-            var hours = String(now.getHours()).padStart(2, '0');
-            var minutes = String(now.getMinutes()).padStart(2, '0');
-            var seconds = String(now.getSeconds()).padStart(2, '0');
-            var timeString = hours + ':' + minutes + ':' + seconds;
+<script>
+    // JavaScript to update a live clock in the browser
+    function updateClock() {
+        var now = new Date();
+        var hours = String(now.getHours()).padStart(2, '0');
+        var minutes = String(now.getMinutes()).padStart(2, '0');
+        var seconds = String(now.getSeconds()).padStart(2, '0');
+        var timeString = hours + ':' + minutes + ':' + seconds;
 
-            var timezoneAbbr = '';
-            try {
-                var timezoneName = Intl.DateTimeFormat().resolvedOptions().timeZone;
-                const commonAbbr = {
-                    "America/New_York": "EDT", "America/Detroit": "EDT", "America/Chicago": "CDT",
-                    "America/Los_Angeles": "PDT", "Europe/London": "BST", "Europe/Berlin": "CEST"
-                };
-                if (commonAbbr[timezoneName]) {
-                    timezoneAbbr = commonAbbr[timezoneName];
-                } else {
-                     // Fallback to a simpler extraction or just the full name if not in commonAbbr
-                     var parts = timezoneName.split('/');
-                     if (parts.length > 1) {
-                         timezoneAbbr = parts[parts.length - 1].replace(/_/g, ' ');
-                     } else {
-                         timezoneAbbr = timezoneName;
-                     }
-                }
-            } catch (e) {
-                console.error("Could not get client timezone:", e);
+        var timezoneAbbr = '';
+        try {
+            var timezoneName = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const commonAbbr = {
+                "America/New_York": "EDT", "America/Detroit": "EDT", "America/Chicago": "CDT",
+                "America/Los_Angeles": "PDT", "Europe/London": "BST", "Europe/Berlin": "CEST"
+            };
+            if (commonAbbr[timezoneName]) {
+                timezoneAbbr = commonAbbr[timezoneName];
+            } else {
+                 // Fallback to a simpler extraction or just the full name if not in commonAbbr
+                 var parts = timezoneName.split('/');
+                 if (parts.length > 1) {
+                     timezoneAbbr = parts[parts.length - 1].replace(/_/g, ' ');
+                 } else {
+                     timezoneAbbr = timezoneName;
+                 }
             }
-
-            document.getElementById('live-clock').textContent = timeString + (timezoneAbbr ? ' ' + timezoneAbbr : '');
+        } catch (e) {
+            console.error("Could not get client timezone:", e);
         }
 
-        setInterval(updateClock, 1000);
-        updateClock();
-    </script>
+        document.getElementById('live-clock').textContent = timeString + (timezoneAbbr ? ' ' + timezoneAbbr : '');
+    }
+
+    setInterval(updateClock, 1000);
+    updateClock();
+</script>
 
 </body>
 </html>
@@ -568,6 +563,7 @@ EOF
 
 # Set proper permissions for the generated HTML file
 /usr/bin/chmod 644 "$OUTPUT_FILE"
-# Removed chown www-data:www-data "$OUTPUT_FILE" for non-root execution simplicity.
+# Set ownership to the Apache user (www-data on Ubuntu)
+/usr/bin/chown www-data:www-data "$OUTPUT_FILE"
 
 /usr/bin/echo "Generated '$OUTPUT_FILE' successfully."
