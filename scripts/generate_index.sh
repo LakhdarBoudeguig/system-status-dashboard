@@ -54,7 +54,7 @@ LOAD_15=$(/usr/bin/echo "$UPTIME_INFO" | /usr/bin/awk -F'load average: ' '{print
 # 5. User Logins (Past 5 Days)
 USER_LOGIN_DATA="No user logins recorded in the past 5 days, or 'last' command output not available."
 
-if /usr/bin/command -v last &> /dev/null
+if [ -x /usr/bin/last ]
 then
     LOGIN_RAW=$(/usr/bin/last -F -s -5days | /usr/bin/grep -Ev "wtmp|reboot|shutdown|system boot" | /usr/bin/head -n 20) # Limit to 20 recent logins
 
