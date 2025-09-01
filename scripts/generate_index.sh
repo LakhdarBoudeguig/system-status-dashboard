@@ -563,8 +563,8 @@ ${UPTIME_INFO}
 EOF
 
 # Set proper permissions for the generated HTML file
-/usr/bin/chmod 644 "$OUTPUT_FILE"
+
 # Set ownership to the Apache user (www-data on Ubuntu)
-/usr/bin/chown www-data:www-data "$OUTPUT_FILE"
+
 
 /usr/bin/echo "Generated '$OUTPUT_FILE' successfully."
