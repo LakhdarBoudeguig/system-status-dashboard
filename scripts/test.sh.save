@@ -1,0 +1,80 @@
+# 5. User Logins (Past 5 Days)
+USER_LOGIN_DATA="<p>The 'last' command is not available to retrieve user login data.</p>"
+
+if [ -x /usr/bin/last ]
+then
+    # Use 'last' to get the last 20 logins from the past 5 days, excluding system entries
+    LOGIN_RAW=$(/usr/bin/last -F -s -5days | /usr/bin/grep -Ev "wtmp|reboot|shutdown|system boot" | /usr/bin/head -n 20)
+
+    if [ -n "$LOGIN_RAW" ]; then
+        # Start building the HTML table
+        USER_LOGIN_DATA="<table style=\"width:100%; border-collapse: collapse; table-layout: fixed;\">"
+        USER_LOGIN_DATA+="<thead><tr style=\"background-color:#444;\">"
+        USER_LOGIN_DATA+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 15%;\">User</th>"
+        USER_LOGIN_DATA+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 25%;\">From (IP/TTY)</th>"
+        USER_LOGIN_DATA+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 30%;\">Login Time</th>"
+        USER_LOGIN_DATA+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 30%;\">Logout Time / Duration</th>"
+        USER_LOGIN_DATA+="</tr></thead><tbody>"
+
+        # Loop through each line of the raw login data
+        while IFS= read -r line; do
+            # Extract specific fields using awk
+            user=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $1}')
+            tty=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $2}')
+
+            # Use more robust awk logic to find the IP/Hostname
+            from=$(/usr/bin/echo "$line" | /usr/bin/awk '{
+                if ($3 ~ /\./ || $3 == ":0" || $3 == ":1") { print $3 }
+                else if ($4 ~ /\./ || $4 == ":0" || $4 == ":1") { print $4 }
+                else { print $3 } # Fallback
+            }')
+
+            # Combine TTY and from location for display
+            display_from="${tty} (${from})"
+
+            # Extract the full login timestamp
+            login_time_full=$(/usr/bin/echo "$line" | /usr/bin/awk '{
+                for (i=5; i<=NF; i++) {
+                    if ($i ~ /^[0-9]{4}$/) { # Found year, print from 4 fields back
+                        for (j=i-4; j<=i; j++) printf "%s ", $j;
+                        exit;
+                    }
+                }
+            }' | /usr/bin/xargs) # xargs trims leading/trailing whitespace
+
+            # Extract the logout info and duration
+            logout_info=$(/usr/bin/echo "$line" | /usr/bin/awk '{
+                logout_start_idx = 0;
+                for (i=5; i<=NF; i++) {
+                    if ($i ~ /^[0-9]{4}$/) { # Found year
+                        logout_start_idx = i + 1;
+                        break;
+                    }
+                }
+                if (logout_start_idx > 0) {
+                    for (i=logout_start_idx; i<=NF; i++) printf "%s ", $i;
+                } else {
+                    print "N/A";
+                }
+            }' | /usr/bin/xargs) # xargs trims leading/trailing whitespace
+
+            # Sanitize data to prevent HTML/script injection
+            user=$(/usr/bin/echo "$user" | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            display_from=$(/usr/bin/echo "$display_from" | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            login_time_full=$(/usr/bin/echo "$login_time_full" | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+            logout_info=$(/usr/bin/echo "$logout_info" | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+
+            # Append a new row to the HTML table
+            USER_LOGIN_DATA+="<tr>"
+            USER_LOGIN_DATA+="<td style=\"padding: 8px; border: 1px solid #555;\">${user}</td>"
+            USER_LOGIN_DATA+="<td style=\"padding: 8px; border: 1px solid #555;\">${display_from}</td>"
+            USER_LOGIN_DATA+="<td style=\"padding: 8px; border: 1px solid #555;\">${login_time_full}</td>"
+            USER_LOGIN_DATA+="<td style=\"padding: 8px; border: 1px solid #555;\">${logout_info}</td>"
+            USER_LOGIN_DATA+="</tr>"
+        done <<< "$LOGIN_RAW" # Feed the raw login data to the loop
+        USER_LOGIN_DATA+="</tbody></table>"
+    fi
+else
+    # Fallback message if the 'last' command is not found
+    USER_LOGIN_DATA="<p>The 'last' command is not available to retrieve user login data.</p>"
+fi
