@@ -59,6 +59,7 @@ then
     LOGIN_RAW=$(/usr/bin/last -F -s -5days | /usr/bin/grep -Ev "wtmp|reboot|shutdown|system boot" | /usr/bin/head -n 20) # Limit to 20 recent logins
 
     if [ -n "$LOGIN_RAW" ]; then
+	# Start Building an html Table
         USER_LOGIN_DATA="<table style=\"width:100%; border-collapse: collapse; table-layout: fixed;\">" # Added table-layout: fixed
         USER_LOGIN_DATA+="<thead><tr style=\"background-color:#444;\">"
         USER_LOGIN_DATA+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 15%;\">User</th>"
@@ -66,8 +67,9 @@ then
         USER_LOGIN_DATA+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 30%;\">Login Time</th>"
         USER_LOGIN_DATA+="<th style=\"padding: 8px; border: 1px solid #555; text-align: left; width: 30%;\">Logout Time / Duration</th>"
         USER_LOGIN_DATA+="</tr></thead><tbody>"
-
+	#Loop thorugh each line of the raw login data
         while IFS= read -r line; do
+	    # Extract Specific Files
             user=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $1}')
             tty=$(/usr/bin/echo "$line" | /usr/bin/awk '{print $2}')
             # Logic to find the IP/Hostname
@@ -76,8 +78,9 @@ then
                 else if ($4 ~ /\./ || $4 == ":0" || $4 == ":1") { print $4 }
                 else { print $3 } # Default to $3 if no clear IP
             }')
+	   # Combine TTY and from location for display
             display_from="${tty} (${from})"
-
+           # Extract the full login timestamp
             login_time_full=$(/usr/bin/echo "$line" | /usr/bin/awk '{
                 for (i=5; i<=NF; i++) {
                     if ($i ~ /^[0-9]{4}$/) { # Found year
@@ -85,8 +88,9 @@ then
                         exit;
                     }
                 }
-            }' | /usr/bin/xargs)
+            }' | /usr/bin/xargs) # xargs trims leading/trailing whitespace
 
+	    # Extract the logout info and duration
             logout_info=$(/usr/bin/echo "$line" | /usr/bin/awk '{
                 logout_start_idx = 0;
                 for (i=5; i<=NF; i++) {
@@ -95,19 +99,23 @@ then
                         break;
                     }
                 }
+		
                 if (logout_start_idx > 0) {
                     for (i=logout_start_idx; i<=NF; i++) printf "%s ", $i;
                 } else {
                     print "N/A";
                 }
-            }' | /usr/bin/xargs)
+            }' | /usr/bin/xargs) # xargs trims leading/trailing whitespace
+
 
             # Escape HTML special characters
+	    # Sanitize data to prevent HTML/script injection
             user=$(/usr/bin/echo "$user" | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
             display_from=$(/usr/bin/echo "$display_from" | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
             login_time_full=$(/usr/bin/echo "$login_time_full" | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
             logout_info=$(/usr/bin/echo "$logout_info" | /usr/bin/sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 
+	    # Append a new row to the HTML table
             USER_LOGIN_DATA+="<tr>"
             USER_LOGIN_DATA+="<td style=\"padding: 8px; border: 1px solid #555;\">${user}</td>"
             USER_LOGIN_DATA+="<td style=\"padding: 8px; border: 1px solid #555;\">${display_from}</td>"
@@ -562,9 +570,12 @@ ${UPTIME_INFO}
 </html>
 EOF
 
-# Set proper permissions for the generated HTML file
+# --- Set Correct Permissions ---
+# After creating the file, set its ownership and permissions so Apache can read it.
+# Using absolute paths for cron-safety.
+/usr/bin/chown www-data:www-data "$OUTPUT_FILE"
+/usr/bin/chmod 644 "$OUTPUT_FILE"
 
-# Set ownership to the Apache user (www-data on Ubuntu)
-
-
+# Log success
+/usr/bin/echo "Generated '$OUTPUT_FILE' and set permissions successfully."
 /usr/bin/echo "Generated '$OUTPUT_FILE' successfully."
